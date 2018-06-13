@@ -1,11 +1,25 @@
 package service_discovery
 
-type DiscoveryServerConfiguration struct {
-	HostName string
-	DefaultPort int
+import (
+	"time"
+	"net"
+	"fmt"
+)
+
+func (ns Nanoservice) IsExpired() bool {
+	nowInMS := time.Now().Unix()
+	return (nowInMS - ns.StartTime) >= ns.TimeToLiveInMS
 }
 
-type Nanoservice interface {
-	Register(config DiscoveryServerConfiguration) (bool, error)
-	GetServerMessage()
+func (ns Nanoservice) IsAlive() bool {
+	address := fmt.Sprintf("%v:%v", ns.HostName, ns.Port)
+	_,err := net.Dial("tcp", address)
+	if err != nil {
+		return false
+	}
+	return true
+}
+
+func (ns *Nanoservice) Refresh() {
+	ns.StartTime = time.Now().Unix()
 }
