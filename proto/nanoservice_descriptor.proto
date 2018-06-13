@@ -1,0 +1,21 @@
+syntax = "proto3";
+package service_discovery;
+option go_package = "service_discovery";
+
+message Nanoservice {
+    int32 port = 1;
+    int64 timeToLiveInMS = 2;
+    int64 startTime = 3;
+    string hostName = 4;
+    string serviceName = 5;
+    string serviceType = 6;
+}
+
+message ServiceListRequest {
+    string serviceType = 1;
+    repeated Nanoservice services = 2;
+}
+
+message KeepAlive {
+    bool isAlive = 1;
+}
