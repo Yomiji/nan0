@@ -11,11 +11,7 @@ message Nanoservice {
     string serviceType = 6;
 }
 
-message ServiceListRequest {
-    string serviceType = 1;
-    repeated Nanoservice services = 2;
-}
-
-message KeepAlive {
-    bool isAlive = 1;
+message NanoserviceList {
+    string serviceType = 2;
+    repeated Nanoservice servicesAvailable = 3;
 }

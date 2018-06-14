@@ -1,8 +1,0 @@
-syntax = "proto3";
-package service_discovery;
-option go_package = "service_discovery";
-import "google/protobuf/any.proto";
-
-message ServiceMessage {
-    google.protobuf.Any message = 1;
-}

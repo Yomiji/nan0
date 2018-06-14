@@ -1,10 +1,15 @@
 package service_discovery
-
+/**
+Nanoservice Discovery API
+Some features that are implemented here:
+DiscoveryService implements Stringer, io.Reader, io.Writer
+This API accepts and manages nanoservices
+ */
 import (
 	"fmt"
 	"time"
 	"github.com/golang/protobuf/proto"
-	"errors"
+	"net"
 )
 
 type DiscoveryService struct {
@@ -59,28 +64,45 @@ func (ds DiscoveryService) GetNanoserviceByName(serviceName string) *Nanoservice
 	return ds.nanoservicesByName[serviceName]
 }
 
-// Implements Writer interface
-func (ds DiscoveryService) Write(p []byte) (n int, err error) {
+func (ds DiscoveryService) GetNanoservicesByTypeBytes(serviceType string) (bytes []byte, err error) {
+	message := &NanoserviceList{
+		ServiceType:serviceType,
+		ServicesAvailable:ds.GetNanoservicesByType(serviceType),
+	}
+	return proto.Marshal(message)
+}
+
+func (ds DiscoveryService) GetNanoserviceByNameBytes(serviceName string) (bytes []byte, err error) {
+	message := ds.GetNanoserviceByName(serviceName)
+	return proto.Marshal(message)
+}
+
+// Implements Writer interface. Assumes that p represents a NanoserviceList
+func (ds *DiscoveryService) Write(p []byte) (n int, err error) {
 	defer func() {
 		if e := recover(); e != nil {
 			err = e.(error)
 		}
 	}()
-	lenOfNano := proto.Size(&Nanoservice{})
-	if len(p) < lenOfNano {
-		return 0, errors.New("invalid length of byte array")
+	// make a NanoserviceList object
+	serviceListMessage := &NanoserviceList{}
+	// convert from byte array to NanoserviceList
+	err = proto.Unmarshal(p, serviceListMessage)
+	// ensure we set n to the size of the message received
+	n = proto.Size(serviceListMessage)
+	//
+	if err != nil {
+		panic(err)
 	}
-	for i := 0; (i * lenOfNano) < len(p); i++ {
-		start := i * lenOfNano
-		end := ((i + 1) * lenOfNano) - 1
-		if end < len(p) {
-			nanoservice := &Nanoservice{}
-			proto.Unmarshal(p[start:end], nanoservice)
-			ds.Register(nanoservice.ServiceType, nanoservice)
-			n += lenOfNano
+	if serviceListMessage.ServiceType != "" {
+		serviceType := serviceListMessage.ServiceType
+		servicesAvailable := serviceListMessage.ServicesAvailable
+		ds.nanoservices[serviceType] = servicesAvailable
+		for _,v := range servicesAvailable {
+			ds.nanoservicesByName[v.ServiceName] = v
 		}
 	}
-	return n, nil
+	return n, err
 }
 
 // Implements Reader interface
@@ -90,20 +112,17 @@ func (ds DiscoveryService) Read(p []byte) (n int, err error) {
 			err = e.(error)
 		}
 	}()
-	j := 0
+
 	for _,service := range ds.nanoservicesByName {
-		bytes, err := proto.Marshal(service)
+		var serviceBytes = make([]byte, 0)
+		serviceBytes, err = proto.Marshal(service)
 		if err != nil {
 			panic(err)
 		}
-		lenOfNano := len(bytes)
-		start := j * lenOfNano
-		end := ((j + 1) * lenOfNano) - 1
-		for i := range p[start : end] {
-			p[start + i] = bytes[i]
-			n++
+		for i,v := range serviceBytes {
+			p[i] = v
 		}
-		j++
+		n += len(serviceBytes)
 	}
 	return n, err
 }
@@ -139,4 +158,25 @@ func NewDiscoveryService(hostName string, port int, serviceRefreshTimeInSec time
 		go ds.pinger()
 	}
 	return ds
+}
+
+// Checks if a particular nanoservice is expired based on its start time and time to live
+func (ns Nanoservice) IsExpired() bool {
+	nowInMS := time.Now().Unix()
+	return (nowInMS - ns.StartTime) >= ns.TimeToLiveInMS
+}
+
+// Checks if this nanoservice is responding to tcp on its port
+func (ns Nanoservice) IsAlive() bool {
+	address := fmt.Sprintf("%v:%v", ns.HostName, ns.Port)
+	_,err := net.Dial("tcp", address)
+	if err != nil {
+		return false
+	}
+	return true
+}
+
+// Refreshes the start time so that this service does not expire
+func (ns *Nanoservice) Refresh() {
+	ns.StartTime = time.Now().Unix()
 }
