@@ -34,17 +34,21 @@ var _ = NewDiscoveryService("", 0, 0)
 
 // Implements Stringer
 func (ds DiscoveryService) String() string {
-	return "(Discovery Service Instance) {"+
+	return "(Discovery Service Instance) {" +
 		"defaultPort='" + fmt.Sprint(ds.defaultPort) +
 		"' nanoservices=[" + fmt.Sprint(ds.nanoservices) +
 		"] " + " shutdown='" + fmt.Sprint(ds.shutdown) + "'}"
 }
 
+// Passes the shutdown condition to this object. The result of this call is the object will no longer be able to process
+// new information via tcp connections. This cannot be reversed and a new object will need to be created to re-establish
+// a tcp server
 func (ds *DiscoveryService) Shutdown() {
 	ds.stale = true
 	ds.shutdown <- true
 }
 
+// Whether a shutdown has been triggered on this object
 func (ds DiscoveryService) IsShutdown() bool {
 	return ds.stale
 }
@@ -59,6 +63,8 @@ func (ds DiscoveryService) GetServicesByName(serviceName string) *Service {
 	return ds.nanoservicesByName[serviceName]
 }
 
+// Get nanoservices registered to this object by the type. The result is the byte-slice representation of the protocol
+// buffer object 'Service'
 func (ds DiscoveryService) GetServicesByTypeBytes(serviceType string) (bytes []byte, err error) {
 	message := &ServiceList{
 		ServiceType:       serviceType,
@@ -67,14 +73,16 @@ func (ds DiscoveryService) GetServicesByTypeBytes(serviceType string) (bytes []b
 	return proto.Marshal(message)
 }
 
+// Get nanoservices registered to this object by name. The result is the byte-slice representation of the protocol
+// buffer object 'Service'
 func (ds DiscoveryService) GetServicesByNameBytes(serviceName string) (bytes []byte, err error) {
 	message := ds.GetServicesByName(serviceName)
 	return proto.Marshal(message)
 }
 
-// Implements Writer interface. Assumes that p represents a NanoserviceList
+// Implements Writer interface. Assumes that p represents a ServiceList
 func (ds *DiscoveryService) Write(p []byte) (n int, err error) {
-	defer recoverPanic(func(e error) { err = e.(error)})
+	defer recoverPanic(func(e error) { err = e.(error) })
 	// make a NanoserviceList object
 	serviceListMessage := &ServiceList{}
 	// convert from byte array to NanoserviceList
@@ -96,9 +104,9 @@ func (ds *DiscoveryService) Write(p []byte) (n int, err error) {
 	return n, err
 }
 
-// Implements Reader interface
+// Implements Reader interface, p represents a ServiceList
 func (ds DiscoveryService) Read(p []byte) (n int, err error) {
-	defer recoverPanic(func(e error) { err = e.(error)})
+	defer recoverPanic(func(e error) { err = e.(error) })
 
 	for _, service := range ds.nanoservicesByName {
 		var serviceBytes = make([]byte, 0)
@@ -257,9 +265,25 @@ func (ns *Service) Refresh() {
  *	Helper Functions
  */
 
-// Create a connection to the given nanoservice
+// Create a connection to this nanoservice
 func (ns *Service) Dial() (conn net.Conn, err error) {
 	return net.Dial("tcp", composeTcpAddress(ns.HostName, ns.Port))
+}
+
+// Registers this nanoservice with the service discovery host at the given address
+func (ns *Service) Register(host string, port int32) (err error) {
+	defer recoverPanic(func(e error) { err = e.(error) })
+	conn, err := net.Dial("tcp", composeTcpAddress(host, port))
+	checkError(err)
+	serviceList := &ServiceList{
+		ServiceType:ns.ServiceType,
+		ServicesAvailable: []*Service{ns},
+	}
+	serviceListBytes, err := proto.Marshal(serviceList)
+	checkError(err)
+	_, err = conn.Write(serviceListBytes)
+	checkError(err)
+	return err
 }
 
 // Checks the error passed and panics if issue found
@@ -275,10 +299,13 @@ func composeTcpAddress(hostName string, port int32) string {
 	return fmt.Sprintf("%s:%d", hostName, port)
 }
 
-func recoverPanic( errfunc func(error) ) func() {
+// Recovers from a panic using the recovery method and applies the given behavior when a recovery
+// has occurred.
+func recoverPanic(errfunc func(error)) func() {
 	if errfunc != nil {
 		return func() {
 			if e := recover(); e != nil {
+				// execute the abstract behavior
 				errfunc(e.(error))
 			}
 		}
