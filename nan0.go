@@ -1,7 +1,7 @@
-package service_discovery
+package nan0
 
 /**
-Nanoservice Discovery API
+Service Discovery API
 Some features that are implemented here:
 DiscoveryService implements Stringer, io.Reader, io.Writer
 This API accepts and manages nanoservices
@@ -13,52 +13,31 @@ import (
 	"net"
 	"os"
 	"io"
+	"log"
 )
 
+// An object that is used to control discovery of different nanoservices that have registered with the system
 type DiscoveryService struct {
-	hostName           string
 	defaultPort        int32
-	nanoservices       map[string][]*Nanoservice
-	nanoservicesByName map[string]*Nanoservice
-	shutdown           <-chan bool
+	nanoservices       map[string][]*Service
+	nanoservicesByName map[string]*Service
+	shutdown           chan bool
 	stale              bool
 }
 
+// A logger with a 'Service API' prefix used to log  s from this api. Call log.SetOutput to change output
+// writer
+var Logger = log.New(os.Stderr, "Service API: ", log.Ldate|log.Ltime|log.Lshortfile)
+
+// use new discovery service to prevent function unused issues
+var _ = NewDiscoveryService("", 0, 0)
+
 // Implements Stringer
 func (ds DiscoveryService) String() string {
-	return "(Discovery Service Instance) {hostName='" + ds.hostName +
-		"' defaultPort='" + fmt.Sprint(ds.defaultPort) +
+	return "(Discovery Service Instance) {"+
+		"defaultPort='" + fmt.Sprint(ds.defaultPort) +
 		"' nanoservices=[" + fmt.Sprint(ds.nanoservices) +
 		"] " + " shutdown='" + fmt.Sprint(ds.shutdown) + "'}"
-}
-
-// Register a nanoservice to the specified service type
-func (ds *DiscoveryService) register(nanoservice *Nanoservice) {
-	registeredServices := ds.nanoservices[nanoservice.ServiceType]
-	registeredServices = append(registeredServices, nanoservice)
-	ds.nanoservicesByName[nanoservice.ServiceName] = nanoservice
-	fmt.Printf("Registered new service: %v", nanoservice)
-}
-
-// Perform a check of all services to see if they are expired. If so, remove them from all maps.
-func (ds DiscoveryService) expireAllNS() {
-	for key, services := range ds.nanoservices {
-		k := 0
-		for _, service := range services {
-			// effectively remove expired services by not saving them
-			if !service.IsExpired() {
-				services[k] = service
-				k++
-			} else {
-				fmt.Printf("Nanoservice expired: %v", service)
-				// explicitly delete all services not saved from the named map
-				delete(ds.nanoservicesByName, service.ServiceName)
-
-			}
-		}
-		// retain all non-expired services
-		ds.nanoservices[key] = services
-	}
 }
 
 func (ds *DiscoveryService) Shutdown() {
@@ -71,37 +50,33 @@ func (ds DiscoveryService) IsShutdown() bool {
 }
 
 // Retrieve a group of nanoservices by their service type
-func (ds DiscoveryService) GetNanoservicesByType(serviceType string) []*Nanoservice {
+func (ds DiscoveryService) GetServicesByType(serviceType string) []*Service {
 	return ds.nanoservices[serviceType]
 }
 
 // Retrieve a nanoservice by its service name
-func (ds DiscoveryService) GetNanoserviceByName(serviceName string) *Nanoservice {
+func (ds DiscoveryService) GetServicesByName(serviceName string) *Service {
 	return ds.nanoservicesByName[serviceName]
 }
 
-func (ds DiscoveryService) GetNanoservicesByTypeBytes(serviceType string) (bytes []byte, err error) {
-	message := &NanoserviceList{
+func (ds DiscoveryService) GetServicesByTypeBytes(serviceType string) (bytes []byte, err error) {
+	message := &ServiceList{
 		ServiceType:       serviceType,
-		ServicesAvailable: ds.GetNanoservicesByType(serviceType),
+		ServicesAvailable: ds.GetServicesByType(serviceType),
 	}
 	return proto.Marshal(message)
 }
 
-func (ds DiscoveryService) GetNanoserviceByNameBytes(serviceName string) (bytes []byte, err error) {
-	message := ds.GetNanoserviceByName(serviceName)
+func (ds DiscoveryService) GetServicesByNameBytes(serviceName string) (bytes []byte, err error) {
+	message := ds.GetServicesByName(serviceName)
 	return proto.Marshal(message)
 }
 
 // Implements Writer interface. Assumes that p represents a NanoserviceList
 func (ds *DiscoveryService) Write(p []byte) (n int, err error) {
-	defer func() {
-		if e := recover(); e != nil {
-			err = e.(error)
-		}
-	}()
+	defer recoverPanic(func(e error) { err = e.(error)})
 	// make a NanoserviceList object
-	serviceListMessage := &NanoserviceList{}
+	serviceListMessage := &ServiceList{}
 	// convert from byte array to NanoserviceList
 	err = proto.Unmarshal(p, serviceListMessage)
 	// ensure we set n to the size of the message received
@@ -123,11 +98,7 @@ func (ds *DiscoveryService) Write(p []byte) (n int, err error) {
 
 // Implements Reader interface
 func (ds DiscoveryService) Read(p []byte) (n int, err error) {
-	defer func() {
-		if e := recover(); e != nil {
-			err = e.(error)
-		}
-	}()
+	defer recoverPanic(func(e error) { err = e.(error)})
 
 	for _, service := range ds.nanoservicesByName {
 		var serviceBytes = make([]byte, 0)
@@ -141,6 +112,35 @@ func (ds DiscoveryService) Read(p []byte) (n int, err error) {
 		n += len(serviceBytes)
 	}
 	return n, err
+}
+
+// Register a nanoservice to the specified service type
+func (ds *DiscoveryService) register(nanoservice *Service) {
+	registeredServices := ds.nanoservices[nanoservice.ServiceType]
+	registeredServices = append(registeredServices, nanoservice)
+	ds.nanoservicesByName[nanoservice.ServiceName] = nanoservice
+	Logger.Printf("Registered new service: %v", nanoservice)
+}
+
+// Perform a check of all services to see if they are expired. If so, remove them from all maps.
+func (ds DiscoveryService) expireAllNS() {
+	for key, services := range ds.nanoservices {
+		k := 0
+		for _, service := range services {
+			// effectively remove expired services by not saving them
+			if !service.IsExpired() {
+				services[k] = service
+				k++
+			} else {
+				Logger.Printf("Service expired: %v", service)
+				// explicitly delete all services not saved from the named map
+				delete(ds.nanoservicesByName, service.ServiceName)
+
+			}
+		}
+		// retain all non-expired services
+		ds.nanoservices[key] = services
+	}
 }
 
 // Runs in the background to expire/refresh nanoservices
@@ -163,7 +163,7 @@ func (ds DiscoveryService) nanoserviceExpiryBackgroundProcess(serviceRefreshTime
 		// check termination of method
 		select {
 		case <-ds.shutdown:
-			fmt.Println("Safely shutting down nanoservice expiration check")
+			Logger.Println("Safely shutting down nanoservice expiration check")
 			return
 		default:
 		}
@@ -172,12 +172,8 @@ func (ds DiscoveryService) nanoserviceExpiryBackgroundProcess(serviceRefreshTime
 
 // Runs in background to receive registration requests from nanoservices
 func (ds *DiscoveryService) tcpMessageReceiver() {
-	defer func() {
-		if e := recover(); e != nil {
-
-		}
-	}()
-	address := composeTcpAddress(ds.hostName, ds.defaultPort)
+	defer recoverPanic(nil)
+	address := composeTcpAddress("", ds.defaultPort)
 	listener, err := net.Listen("tcp", address)
 	checkError(err)
 	for ; ; {
@@ -192,7 +188,7 @@ func (ds *DiscoveryService) tcpMessageReceiver() {
 		// check termination of method
 		select {
 		case <-ds.shutdown:
-			fmt.Println("Safely shutting down tcp service")
+			Logger.Println("Safely shutting down tcp service")
 			err = listener.Close()
 			checkError(err)
 			return
@@ -201,15 +197,12 @@ func (ds *DiscoveryService) tcpMessageReceiver() {
 	}
 }
 
+// Copy the information from the TCP connection to the discovery service
 func (ds *DiscoveryService) handleTcpClient(conn net.Conn) {
-	fmt.Println("Received connection from client")
+	Logger.Println("Received connection from client")
 	var err error = nil
-	defer func() {
-		if e := recover(); e != nil {
-			err = e.(error)
-		}
-	}()
 	defer conn.Close()
+	defer recoverPanic(func(e error) { err = e.(error) })
 	//Read the data waiting on the connection and put it in the data buffer
 	_, err = io.Copy(ds, conn)
 	checkError(err)
@@ -217,11 +210,14 @@ func (ds *DiscoveryService) handleTcpClient(conn net.Conn) {
 
 // Generates a new DiscoveryService instance and starts its management protocol
 func NewDiscoveryService(hostName string, port int32, serviceRefreshTimeInSec time.Duration) *DiscoveryService {
+	if hostName == "" || port == 0 {
+		return &DiscoveryService{}
+	}
+
 	ds := &DiscoveryService{
-		nanoservices:       make(map[string][]*Nanoservice),
-		nanoservicesByName: make(map[string]*Nanoservice),
-		shutdown:           make(<-chan bool),
-		hostName:           hostName,
+		nanoservices:       make(map[string][]*Service),
+		nanoservicesByName: make(map[string]*Service),
+		shutdown:           make(chan bool),
 		defaultPort:        port,
 	}
 	// start expiration process
@@ -231,16 +227,21 @@ func NewDiscoveryService(hostName string, port int32, serviceRefreshTimeInSec ti
 	return ds
 }
 
+/*
+ *	Service API
+ */
+
 // Checks if a particular nanoservice is expired based on its start time and time to live
-func (ns Nanoservice) IsExpired() bool {
+func (ns Service) IsExpired() bool {
 	nowInMS := time.Now().Unix()
 	return (nowInMS - ns.StartTime) >= ns.TimeToLiveInMS
 }
 
 // Checks if this nanoservice is responding to tcp on its port
-func (ns Nanoservice) IsAlive() bool {
+func (ns Service) IsAlive() bool {
 	address := composeTcpAddress(ns.HostName, ns.Port)
-	_, err := net.Dial("tcp", address)
+	conn, err := net.Dial("tcp", address)
+	defer conn.Close()
 	if err != nil {
 		return false
 	}
@@ -248,17 +249,42 @@ func (ns Nanoservice) IsAlive() bool {
 }
 
 // Refreshes the start time so that this service does not expire
-func (ns *Nanoservice) Refresh() {
+func (ns *Service) Refresh() {
 	ns.StartTime = time.Now().Unix()
 }
 
+/*
+ *	Helper Functions
+ */
+
+// Create a connection to the given nanoservice
+func (ns *Service) Dial() (conn net.Conn, err error) {
+	return net.Dial("tcp", composeTcpAddress(ns.HostName, ns.Port))
+}
+
+// Checks the error passed and panics if issue found
 func checkError(err error) {
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error occurred: %s", err.Error())
+		Logger.Printf("Error occurred: %s", err.Error())
 		panic(err)
 	}
 }
 
+// Combines a host name string with a port number to create a valid tcp address
 func composeTcpAddress(hostName string, port int32) string {
-	return fmt.Sprintf("%v:%v", hostName, port)
+	return fmt.Sprintf("%s:%d", hostName, port)
+}
+
+func recoverPanic( errfunc func(error) ) func() {
+	if errfunc != nil {
+		return func() {
+			if e := recover(); e != nil {
+				errfunc(e.(error))
+			}
+		}
+	} else {
+		return func() {
+			recover()
+		}
+	}
 }
