@@ -10,7 +10,7 @@ var (
 	dsDefaultPort int32 = 4345
 
 )
-func TestNanoDiscoveryCreationWithPositiveResult(t *testing.T) {
+func TestNanoDiscoveryCreationShouldSucceed(t *testing.T) {
 	fmt.Println(">>> Running Nano Discovery Creation Test <<<")
 	ds := NewDiscoveryService(dsDefaultPort, 0)
 
@@ -23,7 +23,8 @@ func TestNanoDiscoveryCreationWithPositiveResult(t *testing.T) {
 		t.Fail()
 	}
 }
-func TestNanoDiscoveryCreationWithoutCorrectPort(t *testing.T) {
+
+func TestNanoDiscoveryCreationWithoutCorrectPortShouldFail(t *testing.T) {
 	fmt.Println(">>> Running Nano Discovery Creation with Incorrect Port Test <<<")
 	ds := NewDiscoveryService(0, 0)
 
@@ -36,7 +37,7 @@ func TestNanoDiscoveryCreationWithoutCorrectPort(t *testing.T) {
 	ds.Shutdown()
 }
 
-func TestNanoDiscoveryCanRegisterAService(t *testing.T) {
+func TestNanoDiscoveryRegisterServiceShouldSucceed(t *testing.T) {
 	fmt.Println(">>> Running Nano Discovery Can Register Service <<<")
 	ds := NewDiscoveryService(dsDefaultPort, 0)
 	ns := &Service{
@@ -48,11 +49,19 @@ func TestNanoDiscoveryCanRegisterAService(t *testing.T) {
 		TimeToLiveInMS: 60000,
 	}
 
-	//TODO: figure out a way to get this to finish before shutting down (block on this call)
-	ns.Register("localhost", dsDefaultPort)
+	ns.Register("127.0.0.1", dsDefaultPort)
+
+	//get the service (may not be registered yet)
+	nsr := ds.GetServiceByName("TestService")
+
+	//wait til service is registered
+	for nsr==nil {
+		nsr = ds.GetServiceByName("TestService")
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	//services should be the same
-	if nsr := ds.GetServiceByName("TestService"); nsr == nil  {
+	if  nsr == nil  {
 		fmt.Printf("\t\tTest Failed, nsr == nil, \n\t\t nsr: %v \n\t\t ns: %v", nsr, ns)
 		t.Fail()
 	} else if nsr := ds.GetServiceByName("TestService"); !nsr.Equals(*ns) {
@@ -62,3 +71,5 @@ func TestNanoDiscoveryCanRegisterAService(t *testing.T) {
 
 	ds.Shutdown()
 }
+
+//TODO: test Nan0 structures

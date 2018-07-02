@@ -12,300 +12,34 @@ import (
 	"github.com/golang/protobuf/proto"
 	"net"
 	"os"
-	"io"
 	"log"
-	"errors"
 )
 
-// An object that is used to control discovery of different nanoservices that have registered with the system
-type DiscoveryService struct {
-	defaultPort        int32
-	nanoservices       map[string][]*Service
-	nanoservicesByName map[string]*Service
-	stale              bool
-	shutdown 		   chan bool
-	tcpShutdown		   chan bool
-	livenessShutdown   chan bool
+type Nan0 struct {
+	// The name of the service
+	ServiceName    string
+	// Receive messages from this channel
+	receiver chan *proto.Message
+	// Messages placed on this channel will be sent
+	sender chan *proto.Message
+	// A connection maintained by this object
+	conn           net.Conn
+	// The closed status
+	closed         bool
+	// Channel governing the reader service
+	readerShutdown chan bool
+	// Channel governing the writer service
+	writerShutdown chan bool
 }
 
 // A logger with a 'Service API' prefix used to log  s from this api. Call log.SetOutput to change output
 // writer
 var Logger = log.New(os.Stderr, "Service API: ", log.Ldate|log.Ltime|log.Lshortfile)
 
+// The timeout for TCP Writers and server connections
 var TCPTimeout = 10 * time.Second
 
-// use new discovery service to prevent function unused issues
-var _ = NewDiscoveryService(0, 0)
 
-// Implements Stringer
-func (ds DiscoveryService) String() string {
-	return fmt.Sprintf("(Discovery Service Instance) defaultPort=%v, nanoservices=%v, stale=%v",
-		ds.defaultPort, ds.nanoservicesByName, ds.stale)
-}
-
-// Passes the shutdown condition to this object. The result of this call is the object will no longer be able to process
-// new information via tcp connections. This cannot be reversed and a new object will need to be created to re-establish
-// a tcp server
-func (ds *DiscoveryService) Shutdown() {
-	if ds.stale == true {
-		return
-	}
-	ds.stale = true
-
-	// send the shutdown signal chain, both background services should handle this
-	ds.shutdown <- true
-
-	// ensure that we send something to trigger the net.Accept for this discovery service so that we can continue
-	//defer recoverPanic(nil)
-	//conn, err := net.Dial("tcp", composeTcpAddress("localhost", ds.defaultPort))
-	//checkError(err)
-	//b, err := proto.Marshal(&Service{})
-	//checkError(err)
-	//conn.Write(b)
-
-	// await termination
-	<-ds.tcpShutdown
-	Logger.Printf("TCP at Port '%v' is shutdown", ds.defaultPort)
-	<-ds.livenessShutdown
-	Logger.Printf("Alive check at Port '%v' is shutdown\n", ds.defaultPort)
-}
-
-// Whether a shutdown has been triggered on this object
-func (ds DiscoveryService) IsShutdown() bool {
-	return ds.stale
-}
-
-// Retrieve a group of nanoservices by their service type
-func (ds DiscoveryService) GetServicesByType(serviceType string) []*Service {
-	if ds.stale == true {
-		return nil
-	}
-	return ds.nanoservices[serviceType]
-}
-
-// Retrieve a nanoservice by its service name
-func (ds DiscoveryService) GetServiceByName(serviceName string) *Service {
-	if ds.stale == true {
-		return nil
-	}
-	return ds.nanoservicesByName[serviceName]
-}
-
-// Get nanoservices registered to this object by the type. The result is the byte-slice representation of the protocol
-// buffer object 'Service'
-func (ds DiscoveryService) GetServicesByTypeBytes(serviceType string) (bytes []byte, err error) {
-	if ds.stale == true {
-		return nil, errors.New("discovery service object is stale")
-	}
-	message := &ServiceList{
-		ServiceType:       serviceType,
-		ServicesAvailable: ds.GetServicesByType(serviceType),
-	}
-	return proto.Marshal(message)
-}
-
-// Get nanoservices registered to this object by name. The result is the byte-slice representation of the protocol
-// buffer object 'Service'
-func (ds DiscoveryService) GetServiceByNameBytes(serviceName string) (bytes []byte, err error) {
-	if ds.stale == true {
-		return nil, errors.New("discovery service object is stale")
-	}
-	message := ds.GetServiceByName(serviceName)
-	return proto.Marshal(message)
-}
-
-// Implements Writer interface. Assumes that p represents a ServiceList
-func (ds *DiscoveryService) Write(p []byte) (n int, err error) {
-	if ds.stale == true {
-		return len(p), errors.New("discovery service object is stale")
-	}
-	defer recoverPanic(func(e error) { err = e.(error) })
-	// make a NanoserviceList object
-	serviceListMessage := &ServiceList{}
-	// convert from byte array to NanoserviceList
-	err = proto.Unmarshal(p, serviceListMessage)
-	// ensure we set n to the size of the message received
-	n = proto.Size(serviceListMessage)
-	//
-	if err != nil {
-		panic(err)
-	}
-	if serviceListMessage.ServiceType != "" {
-		serviceType := serviceListMessage.ServiceType
-		servicesAvailable := serviceListMessage.ServicesAvailable
-		ds.nanoservices[serviceType] = servicesAvailable
-		for _, v := range servicesAvailable {
-			ds.nanoservicesByName[v.ServiceName] = v
-		}
-	}
-	return n, err
-}
-
-// Implements Reader interface, p represents a ServiceList
-func (ds DiscoveryService) Read(p []byte) (n int, err error) {
-	if ds.stale == true {
-		return len(p), errors.New("discovery service object is stale")
-	}
-	defer recoverPanic(func(e error) { err = e.(error) })
-
-	for _, service := range ds.nanoservicesByName {
-		var serviceBytes = make([]byte, 0)
-		serviceBytes, err = proto.Marshal(service)
-		if err != nil {
-			panic(err)
-		}
-		for i, v := range serviceBytes {
-			p[i] = v
-		}
-		n += len(serviceBytes)
-	}
-	return n, err
-}
-
-// Register a nanoservice to the specified service type
-func (ds *DiscoveryService) register(nanoservice *Service) {
-	registeredServices := ds.nanoservices[nanoservice.ServiceType]
-	registeredServices = append(registeredServices, nanoservice)
-	ds.nanoservicesByName[nanoservice.ServiceName] = nanoservice
-	Logger.Printf("Registered new service: %v", nanoservice)
-}
-
-// Perform a check of all services to see if they are expired. If so, remove them from all maps.
-func (ds DiscoveryService) expireAllNS() {
-	for key, services := range ds.nanoservices {
-		k := 0
-		for _, service := range services {
-			// effectively remove expired services by not saving them
-			if !service.IsExpired() {
-				services[k] = service
-				k++
-			} else {
-				Logger.Printf("Service expired: %v", service)
-				// explicitly delete all services not saved from the named map
-				delete(ds.nanoservicesByName, service.ServiceName)
-
-			}
-		}
-		// retain all non-expired services
-		ds.nanoservices[key] = services
-	}
-}
-
-// Runs in the background to expire/refresh nanoservices
-func (ds DiscoveryService) nanoserviceExpiryBackgroundProcess(serviceRefreshTimeInSec time.Duration) {
-	Logger.Printf("Starting Liveness Check for Discovery Service on Port %v", ds.defaultPort)
-	for ; ; {
-		// this check occurs every interval
-		time.Sleep(serviceRefreshTimeInSec * time.Second)
-		if len(ds.nanoservices) > 0 {
-			for _, services := range ds.nanoservices {
-				for _, service := range services {
-					if service.IsAlive() {
-						service.Refresh()
-					}
-				}
-			}
-			// perform expiry if they are expired
-			ds.expireAllNS()
-		}
-
-		// check termination of method
-		select {
-		case <-ds.shutdown:
-			Logger.Println("Safely shutting down nanoservice expiration check")
-			// resend on shutdown for any other waiting services
-			ds.shutdown <- true
-			Logger.Println("Liveness shutdown signal successfully resent")
-			// tell Shutdown that we are done with this method
-			//TODO: maybe put these checks into a map
-			ds.livenessShutdown <- true
-			Logger.Println("Liveness final check sent")
-			return
-		default:
-		}
-	}
-}
-
-// Runs in background to receive registration requests from nanoservices
-func (ds *DiscoveryService) tcpMessageReceiver() {
-	Logger.Printf("Starting Nanoservice Receiver for Discovery Service on Port %v", ds.defaultPort)
-	defer recoverPanic(nil)
-	address := composeTcpAddress("", ds.defaultPort)
-	listener, err := net.Listen("tcp", address)
-	checkError(err)
-
-	for ; ; {
-		//set a deadline for listening
-		if listener, ok := listener.(*net.TCPListener); ok {
-			listener.SetDeadline(time.Now().Add(TCPTimeout))
-		}
-		// accept incomming information
-		if conn, err := listener.Accept(); err == nil {
-			// handle the nanoserviceList message
-			go ds.handleTcpClient(conn)
-		}
-
-		// check termination of method, if shutdown channel has received a value
-		select {
-		case <-ds.shutdown:
-			Logger.Println("Safely shutting down tcp service")
-			err = listener.Close()
-			checkError(err)
-			// resend on shutdown for any other waiting services
-			ds.shutdown <- true
-			Logger.Println("TCP's shutdown signal successfully resent")
-			// tell shutdown that this process is now complete
-			// TODO: maybe put these checks into a map
-			ds.tcpShutdown <- true
-			Logger.Println("TCP Final Check Sent")
-			return
-		default:
-		}
-	}
-}
-
-// Copy the information from the TCP connection to the discovery service
-func (ds *DiscoveryService) handleTcpClient(conn net.Conn) {
-	Logger.Println("Received connection from client")
-	var err error = nil
-	defer conn.Close()
-	defer recoverPanic(func(e error) { err = e.(error) })
-	//Read the data waiting on the connection and put it in the data buffer
-	_, err = io.Copy(ds, conn)
-	checkError(err)
-}
-
-// Generates a new DiscoveryService instance and starts its management protocol
-func NewDiscoveryService(port int32, serviceRefreshTimeInSec time.Duration) *DiscoveryService {
-	// skip initialization if port is invalid, return a non-working discovery service and do NOT
-	// start any of the goroutines
-	if port <= 0 {
-		return &DiscoveryService{
-			nanoservicesByName: nil,
-			nanoservices: nil,
-			defaultPort: 0,
-			stale: true,
-			shutdown: nil,
-			tcpShutdown: nil,
-			livenessShutdown: nil,
-		}
-	}
-
-	ds := &DiscoveryService{
-		nanoservices:       make(map[string][]*Service),
-		nanoservicesByName: make(map[string]*Service),
-		defaultPort:        port,
-		stale: 				false,
-		shutdown:			make(chan bool, 1),
-		tcpShutdown:		make(chan bool, 1),
-		livenessShutdown:	make(chan bool, 1),
-	}
-	// start expiration process
-	go ds.nanoserviceExpiryBackgroundProcess(serviceRefreshTimeInSec)
-	// start tcp registration server
-	go ds.tcpMessageReceiver()
-	return ds
-}
 
 /*
  *	Service API
@@ -321,7 +55,11 @@ func (ns Service) IsExpired() bool {
 func (ns Service) IsAlive() bool {
 	address := composeTcpAddress(ns.HostName, ns.Port)
 	conn, err := net.Dial("tcp", address)
-	defer conn.Close()
+	defer func() {
+		if conn != nil {
+			conn.Close()
+		}
+	}()
 	if err != nil {
 		return false
 	}
@@ -336,9 +74,12 @@ func (ns *Service) Refresh() {
 /*
  *	Helper Functions
  */
-// Create a connection to this nanoservice
-func (ns *Service) Dial() (conn net.Conn, err error) {
-	return net.Dial("tcp", composeTcpAddress(ns.HostName, ns.Port))
+
+// Create a connection to this nanoservice using a traditional TCP connection
+func (ns *Service) DialTCP() (nan0 net.Conn, err error) {
+	conn, err := net.Dial("tcp", composeTcpAddress(ns.HostName, ns.Port))
+
+	return conn, err
 }
 
 // Registers this nanoservice with the service discovery host at the given address
@@ -359,6 +100,7 @@ func (ns *Service) Register(host string, port int32) (err error) {
 	return err
 }
 
+// Compare two service instances for equality
 func (ns Service) Equals(other Service) bool {
 	return ns.Port == other.Port &&
 		ns.HostName == other.HostName &&
@@ -366,6 +108,117 @@ func (ns Service) Equals(other Service) bool {
 		ns.StartTime == other.StartTime &&
 		ns.ServiceName == other.ServiceName &&
 		ns.ServiceType == other.ServiceType
+}
+
+// Create a connection to this nanoservice using the Nan0 wrapper around a protocol buffer service layer
+func (ns *Service) DialNan0(writeDeadlineActive bool, receiverMessageIdentity *proto.Message) (nan0 *Nan0, err error) {
+	defer recoverPanic(func(e error) {
+		nan0 = &Nan0{
+			ServiceName:    ns.ServiceName,
+			receiver:       nil,
+			sender:         nil,
+			conn:           nil,
+			closed:         true,
+			writerShutdown: nil,
+			readerShutdown: nil,
+		}
+		err = e.(error)
+	})
+	conn, err := net.Dial("tcp", composeTcpAddress(ns.HostName, ns.Port))
+	nan0 = &Nan0{
+		ServiceName:    ns.ServiceName,
+		receiver:       make(chan *proto.Message),
+		sender:         make(chan *proto.Message),
+		conn:           conn,
+		closed:         false,
+		writerShutdown: make(chan bool, 1),
+		readerShutdown: make(chan bool, 1),
+	}
+	checkError(err)
+
+	go nan0.startServiceReceiver(receiverMessageIdentity)
+	go nan0.startServiceSender(writeDeadlineActive)
+	return nan0, err
+}
+
+// constantly reads from the open connection and places the received message on receiver channel
+func (n *Nan0) startServiceReceiver(msg *proto.Message) {
+	if n.conn != nil && !n.closed {
+		for ; ; {
+			n.conn.SetReadDeadline(time.Now().Add(TCPTimeout))
+			b := make([]byte, 1024)
+			_, err := n.conn.Read(b)
+			if err != nil {
+				Logger.Printf("Reader error on connection for Server '%v'", n.ServiceName)
+				continue
+			}
+			err = proto.Unmarshal(b, msg)
+			if err != nil {
+				Logger.Printf("Unmarshaler error on connection for Server '%v'", n.ServiceName)
+				continue
+			}
+			// Send the message received to the awaiting receive buffer
+			n.receiver <- msg
+			select {
+			case <-n.readerShutdown:
+				n.writerShutdown <- true
+				Logger.Printf("Shutting down service receiver for %v", n.ServiceName)
+				return
+			default:
+			}
+		}
+	}
+}
+
+func (n *Nan0) startServiceSender(writeDeadlineIsActive bool) {
+	if n.conn != nil && !n.closed {
+		for ; ; {
+			if writeDeadlineIsActive {
+				n.conn.SetWriteDeadline(time.Now().Add(TCPTimeout))
+			}
+			pb := <-n.sender
+			b, err := proto.Marshal(pb)
+			if err != nil {
+				Logger.Printf("Marshaller error on connection for Server '%v'", n.ServiceName)
+				continue
+			}
+			_, err = n.conn.Write(b)
+			if err != nil {
+				Logger.Printf("Writer error on connection for Server '%v'", n.ServiceName)
+				continue
+			}
+
+			select {
+			case <-n.writerShutdown:
+				n.readerShutdown <- true
+				Logger.Printf("Shutting down service writer for %v", n.ServiceName)
+				return
+			default:
+			}
+		}
+	}
+}
+
+// Closes the open connection and terminates the goroutines associated with reading them
+func (n *Nan0) Close() {
+	if n.closed {
+		return
+	}
+	n.closed = true
+	n.readerShutdown <- true
+	Logger.Printf("Reader stream for Nan0 server '%v' shutdown signal sent", n.ServiceName)
+	n.writerShutdown <- true
+	Logger.Printf("Writer stream for Nan0 server '%v' shutdown signal sent", n.ServiceName)
+}
+
+// Return a write-only channel that is used to send a protocol buffer message through this connection
+func (n *Nan0) GetSender() chan<- *proto.Message {
+	return n.sender
+}
+
+// Returns a read-only channel that is used to receive a protocol buffer message returned through this connection
+func (n *Nan0) GetReceiver() <-chan *proto.Message {
+	return n.receiver
 }
 
 // Checks the error passed and panics if issue found
