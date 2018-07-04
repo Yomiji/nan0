@@ -3,8 +3,8 @@ package nan0;
 option go_package = "nan0";
 
 message Service {
-    int32 port = 1;
-    int64 timeToLiveInMS = 2;
+    bool expired = 1;
+    int32 port = 2;
     int64 startTime = 3;
     string hostName = 4;
     string serviceName = 5;
@@ -12,6 +12,6 @@ message Service {
 }
 
 message ServiceList {
-    string serviceType = 2;
-    repeated Service servicesAvailable = 3;
+    string serviceType = 1;
+    repeated Service servicesAvailable = 2;
 }

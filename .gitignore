@@ -1,7 +1,7 @@
 # Created by .ignore support plugin (hsz.mobi)
 ### Go template
 # Binaries for programs and plugins
-*.exe
+../build/go_build_Code_.exe
 *.exe~
 *.dll
 *.so

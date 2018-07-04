@@ -20,9 +20,6 @@ type DiscoveryService struct {
 	livenessShutdown   chan bool
 }
 
-// use new discovery service to prevent function unused issues
-var _ = NewDiscoveryService(0, 0)
-
 // Implements Stringer
 func (ds DiscoveryService) String() string {
 	return fmt.Sprintf("(Discovery Service Instance) defaultPort=%v, nanoservices=%v, stale=%v",
@@ -43,9 +40,9 @@ func (ds *DiscoveryService) Shutdown() {
 
 	// await termination
 	<-ds.tcpShutdown
-	Logger.Printf("TCP at Port '%v' is shutdown", ds.defaultPort)
+	info("TCP at Port '%v' is shutdown", ds.defaultPort)
 	<-ds.livenessShutdown
-	Logger.Printf("Alive check at Port '%v' is shutdown\n", ds.defaultPort)
+	info("Alive check at Port '%v' is shutdown\n", ds.defaultPort)
 }
 
 // Whether a shutdown has been triggered on this object
@@ -109,11 +106,9 @@ func (ds *DiscoveryService) Write(p []byte) (n int, err error) {
 		panic(err)
 	}
 	if serviceListMessage.ServiceType != "" {
-		serviceType := serviceListMessage.ServiceType
 		servicesAvailable := serviceListMessage.ServicesAvailable
-		ds.nanoservices[serviceType] = servicesAvailable
 		for _, v := range servicesAvailable {
-			ds.nanoservicesByName[v.ServiceName] = v
+			ds.register(v)
 		}
 	}
 	return n, err
@@ -142,10 +137,13 @@ func (ds DiscoveryService) Read(p []byte) (n int, err error) {
 
 // Register a nanoservice to the specified service type
 func (ds *DiscoveryService) register(nanoservice *Service) {
-	registeredServices := ds.nanoservices[nanoservice.ServiceType]
+	st := nanoservice.ServiceType
+	registeredServices := ds.nanoservices[st]
 	registeredServices = append(registeredServices, nanoservice)
+	ds.nanoservices[st] = registeredServices
 	ds.nanoservicesByName[nanoservice.ServiceName] = nanoservice
-	Logger.Printf("Registered new service: %v", nanoservice)
+	info("Registered new service: %v", nanoservice)
+	debug("Services for type '%v': '%v'", st, ds.nanoservices[st])
 }
 
 // Perform a check of all services to see if they are expired. If so, remove them from all maps.
@@ -158,7 +156,7 @@ func (ds DiscoveryService) expireAllNS() {
 				services[k] = service
 				k++
 			} else {
-				Logger.Printf("Service expired: %v", service)
+				info("Service expired: %v", service)
 				// explicitly delete all services not saved from the named map
 				delete(ds.nanoservicesByName, service.ServiceName)
 
@@ -171,7 +169,7 @@ func (ds DiscoveryService) expireAllNS() {
 
 // Runs in the background to expire/refresh nanoservices
 func (ds DiscoveryService) nanoserviceExpiryBackgroundProcess(serviceRefreshTimeInSec time.Duration) {
-	Logger.Printf("Starting Liveness Check for Discovery Service on Port %v", ds.defaultPort)
+	info("Starting Liveness Check for Discovery Service on Port %v", ds.defaultPort)
 	for ; ; {
 		// this check occurs every interval
 		time.Sleep(serviceRefreshTimeInSec * time.Second)
@@ -193,9 +191,9 @@ func (ds DiscoveryService) nanoserviceExpiryBackgroundProcess(serviceRefreshTime
 			// resend on shutdown for any other waiting services
 			ds.shutdown <- true
 			// tell Shutdown that we are done with this method
-			//TODO: maybe put these checks into a map
+			//NOTE: maybe put these checks into a map
 			ds.livenessShutdown <- true
-			Logger.Println("Safely shutting down nanoservice expiration check")
+			info("Safely shutting down nanoservice expiration check")
 			return
 		default:
 		}
@@ -204,7 +202,7 @@ func (ds DiscoveryService) nanoserviceExpiryBackgroundProcess(serviceRefreshTime
 
 // Runs in background to receive registration requests from nanoservices
 func (ds *DiscoveryService) tcpMessageReceiver() {
-	Logger.Printf("Starting Nanoservice Receiver for Discovery Service on Port %v", ds.defaultPort)
+	info("Starting Nanoservice Receiver for Discovery Service on Port %v", ds.defaultPort)
 	defer recoverPanic(nil)
 	address := composeTcpAddress("", ds.defaultPort)
 	listener, err := net.Listen("tcp", address)
@@ -229,9 +227,9 @@ func (ds *DiscoveryService) tcpMessageReceiver() {
 			// resend on shutdown for any other waiting services
 			ds.shutdown <- true
 			// tell shutdown that this process is now complete
-			// TODO: maybe put these checks into a map
+			// NOTE: maybe put these checks into a map
 			ds.tcpShutdown <- true
-			Logger.Println("Safely shutting down tcp service")
+			info("Safely shutting down tcp service")
 			return
 		default:
 		}
@@ -240,7 +238,7 @@ func (ds *DiscoveryService) tcpMessageReceiver() {
 
 // Copy the information from the TCP connection to the discovery service
 func (ds *DiscoveryService) handleTcpClient(conn net.Conn) {
-	Logger.Println("Received connection from client")
+	info("Received connection from client")
 	var err error = nil
 	defer conn.Close()
 	defer recoverPanic(func(e error) { err = e.(error) })
