@@ -72,11 +72,15 @@ func (ds DiscoveryService) GetServicesByTypeBytes(serviceType string) (bytes []b
 	if ds.stale == true {
 		return nil, errors.New("discovery service object is stale")
 	}
-	message := &ServiceList{
-		ServiceType:       serviceType,
-		ServicesAvailable: ds.GetServicesByType(serviceType),
+	servicesQueried := ds.GetServicesByType(serviceType)
+	if len(servicesQueried) > 0 {
+		message := &ServiceList{
+			ServiceType:       serviceType,
+			ServicesAvailable: ds.GetServicesByType(serviceType),
+		}
+		return proto.Marshal(message)
 	}
-	return proto.Marshal(message)
+	return nil, nil
 }
 
 // Get nanoservices registered to this object by name. The result is the byte-slice representation of the protocol
@@ -159,7 +163,6 @@ func (ds DiscoveryService) expireAllNS() {
 				info("Service expired: %v", service)
 				// explicitly delete all services not saved from the named map
 				delete(ds.nanoservicesByName, service.ServiceName)
-
 			}
 		}
 		// retain all non-expired services
