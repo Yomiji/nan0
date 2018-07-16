@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 	"os"
+	"io"
 )
 
 var (
@@ -30,6 +31,7 @@ func TestNanoDiscoveryCreationWithoutCorrectPortShouldFail(t *testing.T) {
 func TestNanoDiscoveryRegisterServiceShouldSucceed(t *testing.T) {
 	fmt.Println(">>> Running Nano Discovery Register Service Should Succeed Test <<<")
 	ds := NewDiscoveryService(dsDefaultPort, 0)
+	defer ds.Shutdown()
 	ns := &Service{
 		ServiceType:"Test",
 		StartTime:time.Now().Unix(),
@@ -59,12 +61,12 @@ func TestNanoDiscoveryRegisterServiceShouldSucceed(t *testing.T) {
 		t.Fail()
 	}
 
-	ds.Shutdown()
 }
 
 func TestNanoDiscoveryRegisterMultipleServicesShouldSucceed(t *testing.T) {
 	fmt.Println(">>> Running Nano Discovery Multiple Services Should Succeed Test <<<")
 	ds := NewDiscoveryService(dsDefaultPort, 0)
+	defer ds.Shutdown()
 	ns1 := &Service{
 		ServiceType:"Test",
 		StartTime:time.Now().Unix(),
@@ -105,12 +107,12 @@ func TestNanoDiscoveryRegisterMultipleServicesShouldSucceed(t *testing.T) {
 		t.Fail()
 	}
 
-	ds.Shutdown()
 }
 
 func TestNanoDiscoveryRegisteredServicesTimeOut(t *testing.T) {
 	fmt.Println(">>> Running Nano Discovery Registered Services Time Out Test <<<")
 	ds := NewDiscoveryService(dsDefaultPort, 3)
+	defer ds.Shutdown()
 	// make a service that is inactive, no tcp, should be removed when service refresh time hits
 	ns := &Service{
 		ServiceType:"Test",
@@ -157,12 +159,12 @@ func TestNanoDiscoveryRegisteredServicesTimeOut(t *testing.T) {
 		fmt.Printf("\t\tTest Failed, nsr != nil, \n\t\t nsr: %v", nsr)
 		t.Fail()
 	}
-	ds.Shutdown()
 }
 
 func TestNanoDiscoveryGetServiceBytes(t *testing.T) {
 	fmt.Println(">>> Running Nano Discovery Service Bytes Functions <<<")
 	ds := NewDiscoveryService(dsDefaultPort, 0)
+	defer ds.Shutdown()
 	// make a service that is inactive, no tcp, should be removed when service refresh time hits
 	ns := &Service{
 		ServiceType:"Test",
@@ -219,5 +221,49 @@ func TestNanoDiscoveryGetServiceBytes(t *testing.T) {
 		t.Fail()
 	}
 
-	ds.Shutdown()
+}
+
+func TestNanoDiscoveryServiceCanBeSerializedUsingRead(t *testing.T) {
+	fmt.Println(">>> Running Nano Discovery Service Can Be Serialized Using Read <<<")
+	ds := NewDiscoveryService(dsDefaultPort, 0)
+	defer ds.Shutdown()
+	// make a service that is inactive, no tcp, should be removed when service refresh time hits
+	ns1 := &Service{
+		ServiceType:"Test",
+		StartTime:time.Now().Unix(),
+		ServiceName:"TestService1",
+		HostName:"localhost",
+		Port:5555,
+		Expired: false,
+	}
+	ns2 := &Service{
+		ServiceType:"Test",
+		StartTime:time.Now().Unix(),
+		ServiceName:"TestService2",
+		HostName:"localhost",
+		Port:5555,
+		Expired: false,
+	}
+	ns1.Register("localhost", dsDefaultPort)
+	ns2.Register("localhost", dsDefaultPort)
+
+	nses := ds.GetServicesByType("Test")
+
+	//wait til service is registered
+	deadline := time.Now().Add(10*time.Second)
+	for len(nses) < 2  && time.Now().Before(deadline) {
+		nses = ds.GetServicesByType("TestService")
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	nds := NewDiscoveryService(dsDefaultPort+1, 0)
+	defer nds.Shutdown()
+
+	// copy from one discovery service to another
+	io.Copy(nds, ds)
+
+	ndsServices := nds.GetServicesByType("Test")
+	if len(ndsServices) != 2 {
+		t.Fail()
+	}
 }

@@ -125,17 +125,33 @@ func (ds DiscoveryService) Read(p []byte) (n int, err error) {
 	}
 	defer recoverPanic(func(e error) { err = e.(error) })
 
+	var nanoservices []*Service = nil
+
+	// get all nanoservices available and construct slice of nanoservices
 	for _, service := range ds.nanoservicesByName {
-		var serviceBytes = make([]byte, 0)
-		serviceBytes, err = proto.Marshal(service)
-		if err != nil {
-			panic(err)
-		}
-		for i, v := range serviceBytes {
-			p[i] = v
-		}
-		n += len(serviceBytes)
+		nanoservices = append(nanoservices, service)
 	}
+
+	// make nanoservice list of all items
+	nanoservicesList := &ServiceList{
+		ServiceType:"ALL",
+		ServicesAvailable:nanoservices,
+	}
+
+	// convert list of all nanoservices to bytes
+	listBytes, err := proto.Marshal(nanoservicesList)
+	checkError(err)
+
+	for i, v := range listBytes {
+		p[i] = v
+		n++
+	}
+
+	// if all bytes are read in, send io.EOF
+	if n == proto.Size(nanoservicesList) {
+		err = io.EOF
+	}
+
 	return n, err
 }
 
