@@ -10,9 +10,6 @@ import (
 	"time"
 	"github.com/golang/protobuf/proto"
 	"net"
-	"log"
-	"os"
-	"fmt"
 )
 
 // The Nan0 structure is a wrapper around a net/TCP connection which sends
@@ -37,65 +34,10 @@ type Nan0 struct {
 	writerShutdown chan bool
 }
 
-/*************
-	Logging
-************/
-
-//Loggers provided:
-//  Level | Output | Format
-// 	Info: Standard Output - 'Nan0 [INFO] %date% %time% %filename:line%'
-// 	Warn: Standard Error - 'Nan0 [DEBUG] %date% %time% %filename:line%'
-// 	Error: Standard Error - 'Nan0 [ERROR] %date% %time% %filename:line%'
-// 	Debug: Standard Output - 'Nan0 [DEBUG] %date% %time% %filename:line%'
-var (
-	Info  = log.New(os.Stdout, "Nan0 [INFO]: ", log.Ldate|log.Ltime|log.Lshortfile)
-	Warn  = log.New(os.Stderr, "Nan0 [DEBUG]: ", log.Ldate|log.Ltime|log.Lshortfile)
-	Error = log.New(os.Stderr, "Nan0 [ERROR]: ", log.Ldate|log.Ltime|log.Lshortfile)
-	Debug = log.New(os.Stdout, "Nan0 [DEBUG]: ", log.Ldate|log.Ltime|log.Lshortfile)
-)
-
-// Wrapper around the Info global log that allows for this api to log to that level correctly
-func info(msg string, vars...interface{}) {
-	if Info != nil {
-		Info.Printf(msg, vars...)
-	}
-}
-
-// Wrapper around the Warn global log that allows for this api to log to that level correctly
-func warn(msg string, vars...interface{}) {
-	if Warn != nil {
-		Warn.Printf(msg, vars...)
-	}
-}
-
-// Wrapper around the Error global log that allows for this api to log to that level correctly
-func fail(msg string, vars...interface{}) {
-	if Error != nil {
-		Error.Printf(msg, vars...)
-	}
-}
-
-// Wrapper around the Debug global log that allows for this api to log to that level correctly
-func debug(msg string, vars...interface{}) {
-	if Debug != nil {
-		Debug.Printf(msg, vars...)
-	}
-}
-
-// Conveniently disable all logging for this api
-func noLogging() {
-	Info = nil
-	Warn = nil
-	Error = nil
-	Debug = nil
-}
-
-// The timeout for TCP Writers and server connections
-var TCPTimeout = 10 * time.Second
-
 /*******************
  	Service API
  *******************/
+
 
 // Starts the listener for the given service
 func (ns *Service) Start() (net.Listener, error) {
@@ -158,13 +100,13 @@ func (ns Service) Equals(other Service) bool {
 
 // Create a connection to this nanoservice using a traditional TCP connection
 func (ns *Service) DialTCP() (nan0 net.Conn, err error) {
-	conn, err := net.Dial("tcp", composeTcpAddress(ns.HostName, ns.Port))
+	nan0, err = net.Dial("tcp", composeTcpAddress(ns.HostName, ns.Port))
 
-	return conn, err
+	return nan0, err
 }
 
 // Create a connection to this nanoservice using the Nan0 wrapper around a protocol buffer service layer
-func (ns *Service) DialNan0(writeDeadlineActive bool, receiverMessageIdentity proto.Message) (nan0 *Nan0, err error) {
+func (ns *Service) DialNan0(writeDeadlineActive bool, receiverMessageIdentity *proto.Message) (nan0 *Nan0, err error) {
 	defer recoverPanic(func(e error) {
 		nan0 = &Nan0{
 			ServiceName:    ns.ServiceName,
@@ -177,7 +119,10 @@ func (ns *Service) DialNan0(writeDeadlineActive bool, receiverMessageIdentity pr
 		}
 		err = e.(error)
 	})
+	_, err = net.Listen("tcp", composeTcpAddress(ns.HostName, ns.Port))
+	checkError(err)
 	conn, err := net.Dial("tcp", composeTcpAddress(ns.HostName, ns.Port))
+	checkError(err)
 	nan0 = &Nan0{
 		ServiceName:    ns.ServiceName,
 		receiver:       make(chan proto.Message),
@@ -187,7 +132,6 @@ func (ns *Service) DialNan0(writeDeadlineActive bool, receiverMessageIdentity pr
 		writerShutdown: make(chan bool, 1),
 		readerShutdown: make(chan bool, 1),
 	}
-	checkError(err)
 
 	go nan0.startServiceReceiver(receiverMessageIdentity)
 	go nan0.startServiceSender(writeDeadlineActive)
@@ -196,21 +140,12 @@ func (ns *Service) DialNan0(writeDeadlineActive bool, receiverMessageIdentity pr
 
 // Start the active receiver for this Nan0 connection. This enables the 'receiver' channel,
 // constantly reads from the open connection and places the received message on receiver channel
-func (n *Nan0) startServiceReceiver(msg proto.Message) {
+func (n *Nan0) startServiceReceiver(msg *proto.Message) {
 	if n.conn != nil && !n.closed {
 		for ; ; {
 			n.conn.SetReadDeadline(time.Now().Add(TCPTimeout))
-			b := make([]byte, 1024)
-			_, err := n.conn.Read(b)
-			if err != nil {
-				info("Reader error on connection for Server '%v'", n.ServiceName)
-				continue
-			}
-			err = proto.Unmarshal(b, msg)
-			if err != nil {
-				info("Unmarshaler error on connection for Server '%v'", n.ServiceName)
-				continue
-			}
+
+			getMessageFromConnection(n.conn, msg)
 			// Send the message received to the awaiting receive buffer
 			n.receiver <- msg
 			select {
@@ -233,17 +168,7 @@ func (n *Nan0) startServiceSender(writeDeadlineIsActive bool) {
 				n.conn.SetWriteDeadline(time.Now().Add(TCPTimeout))
 			}
 			pb := <-n.sender
-			b, err := proto.Marshal(pb)
-			if err != nil {
-				info("Marshaller error on connection for Server '%v'", n.ServiceName)
-				continue
-			}
-			_, err = n.conn.Write(b)
-			if err != nil {
-				info("Writer error on connection for Server '%v'", n.ServiceName)
-				continue
-			}
-
+			putMessageInConnection(n.conn, pb)
 			select {
 			case <-n.writerShutdown:
 				n.readerShutdown <- true
@@ -275,38 +200,4 @@ func (n *Nan0) GetSender() chan<- proto.Message {
 // Returns a read-only channel that is used to receive a protocol buffer message returned through this connection
 func (n *Nan0) GetReceiver() <-chan proto.Message {
 	return n.receiver
-}
-
-/*************************
-	Helper Functions
-*************************/
-
-//	Checks the error passed and panics if issue found
-func checkError(err error) {
-	if err != nil {
-		info("Error occurred: %s", err.Error())
-		panic(err)
-	}
-}
-
-// Combines a host name string with a port number to create a valid tcp address
-func composeTcpAddress(hostName string, port int32) string {
-	return fmt.Sprintf("%s:%d", hostName, port)
-}
-
-// Recovers from a panic using the recovery method and applies the given behavior when a recovery
-// has occurred.
-func recoverPanic(errfunc func(error)) func() {
-	if errfunc != nil {
-		return func() {
-			if e := recover(); e != nil {
-				// execute the abstract behavior
-				errfunc(e.(error))
-			}
-		}
-	} else {
-		return func() {
-			recover()
-		}
-	}
 }

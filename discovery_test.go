@@ -29,7 +29,7 @@ func TestNanoDiscoveryCreationWithoutCorrectPortShouldFail(t *testing.T) {
 }
 
 func TestNanoDiscoveryRegisterServiceShouldSucceed(t *testing.T) {
-	fmt.Println(">>> Running Nano Discovery Register Service Should Succeed Test <<<")
+	fmt.Println(">>> Running Nano Discovery Register Servic  Should Succeed Test <<<")
 	ds := NewDiscoveryService(dsDefaultPort, 0)
 	defer ds.Shutdown()
 	ns := &Service{
