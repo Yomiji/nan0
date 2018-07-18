@@ -98,7 +98,7 @@ func (ds *DiscoveryService) Write(p []byte) (n int, err error) {
 	if ds.stale == true {
 		return len(p), errors.New("discovery service object is stale")
 	}
-	defer recoverPanic(func(e error) { err = e.(error) })
+	defer recoverPanic(func(e error) { err = e.(error) })()
 	// make a NanoserviceList object
 	serviceListMessage := &ServiceList{}
 	// convert from byte array to NanoserviceList
@@ -123,7 +123,7 @@ func (ds DiscoveryService) Read(p []byte) (n int, err error) {
 	if ds.stale == true {
 		return len(p), errors.New("discovery service object is stale")
 	}
-	defer recoverPanic(func(e error) { err = e.(error) })
+	defer recoverPanic(func(e error) { err = e.(error) })()
 
 	var nanoservices []*Service = nil
 
@@ -222,7 +222,7 @@ func (ds DiscoveryService) nanoserviceExpiryBackgroundProcess(serviceRefreshTime
 // Runs in background to receive registration requests from nanoservices
 func (ds *DiscoveryService) tcpMessageReceiver() {
 	info("Starting Nanoservice Receiver for Discovery Service on Port %v", ds.defaultPort)
-	defer recoverPanic(nil)
+	defer recoverPanic(nil)()
 	address := composeTcpAddress("", ds.defaultPort)
 	listener, err := net.Listen("tcp", address)
 	checkError(err)
@@ -260,7 +260,7 @@ func (ds *DiscoveryService) handleTcpClient(conn net.Conn) {
 	info("Received connection from client")
 	var err error = nil
 	defer conn.Close()
-	defer recoverPanic(func(e error) { err = e.(error) })
+	defer recoverPanic(func(e error) { err = e.(error) })()
 	//Read the data waiting on the connection and put it in the data buffer
 	_, err = io.Copy(ds, conn)
 	checkError(err)

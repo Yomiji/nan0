@@ -10,6 +10,7 @@ import (
 	"os"
 	"log"
 	"errors"
+	"io"
 )
 
 /*************
@@ -24,7 +25,7 @@ import (
 // 	Debug: Standard Output - 'Nan0 [DEBUG] %date% %time% %filename:line%'
 var (
 	Info  = log.New(os.Stdout, "Nan0 [INFO]: ", log.Ldate|log.Ltime|log.Lshortfile)
-	Warn  = log.New(os.Stderr, "Nan0 [DEBUG]: ", log.Ldate|log.Ltime|log.Lshortfile)
+	Warn  = log.New(os.Stderr, "Nan0 [WARN]: ", log.Ldate|log.Ltime|log.Lshortfile)
 	Error = log.New(os.Stderr, "Nan0 [ERROR]: ", log.Ldate|log.Ltime|log.Lshortfile)
 	Debug = log.New(os.Stdout, "Nan0 [DEBUG]: ", log.Ldate|log.Ltime|log.Lshortfile)
 )
@@ -58,11 +59,26 @@ func debug(msg string, vars ...interface{}) {
 }
 
 // Conveniently disable all logging for this api
-func noLogging() {
+func NoLogging() {
 	Info = nil
 	Warn = nil
 	Error = nil
 	Debug = nil
+}
+
+func SetLogWriter( w io.Writer ) {
+	if Info != nil {
+		Info = log.New(w, "Nan0 [INFO]: ", log.Ldate|log.Ltime|log.Lshortfile)
+	}
+	if Warn != nil {
+		Warn  = log.New(w, "Nan0 [WARN]: ", log.Ldate|log.Ltime|log.Lshortfile)
+	}
+	if Error != nil {
+		Error = log.New(w, "Nan0 [ERROR]: ", log.Ldate|log.Ltime|log.Lshortfile)
+	}
+	if Debug != nil {
+		Debug = log.New(w, "Nan0 [DEBUG]: ", log.Ldate|log.Ltime|log.Lshortfile)
+	}
 }
 
 // The timeout for TCP Writers and server connections
@@ -140,7 +156,7 @@ func recoverPanic(errfunc func(error)) func() {
 func putMessageInConnection(conn net.Conn, pb proto.Message) (err error) {
 	defer recoverPanic(func(e error) {
 		fail("Message failed to send: %v due to %v", pb, e)
-	})
+	})()
 	buffer := bufio.NewWriter(conn)
 	// write the preamble
 	buffer.Write(ProtoPreamble)
@@ -163,10 +179,10 @@ func putMessageInConnection(conn net.Conn, pb proto.Message) (err error) {
 // 	1. The preamble bytes stored in ProtoPreamble (defaults to 7 bytes)
 //	2. The size of the following protocol buffer message (defaults to 2 bytes)
 // 	3. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
-func getMessageFromConnection(conn net.Conn, pb *proto.Message) (err error) {
+func getMessageFromConnection(conn net.Conn, pb proto.Message) (err error) {
 	defer recoverPanic(func(e error) {
 		fail("Failed to receive message due to %v", e)
-	})
+	})()
 	buffer := bufio.NewReader(conn)
 	// check the preamble
 	isPreambleValid(buffer)
@@ -193,7 +209,7 @@ func isPreambleValid(reader *bufio.Reader) (result bool) {
 	defer recoverPanic(func(e error) {
 		debug("preamble issue: %v", e)
 		result = false
-	})
+	})()
 	for i := 0; i < len(ProtoPreamble); i++ {
 		b, err := reader.ReadByte()
 		checkError(err)
@@ -208,7 +224,7 @@ func isPreambleValid(reader *bufio.Reader) (result bool) {
 func readSize(reader *bufio.Reader) int {
 	defer recoverPanic(func(e error) {
 		debug("issue reading size: %v", e)
-	})
+	})()
 	bytes := make([]byte, SizeArrayWidth)
 	for i := 0; i < len(bytes); i++ {
 		b, err := reader.ReadByte()
@@ -222,7 +238,7 @@ func readSize(reader *bufio.Reader) int {
 func writeSize(writer *bufio.Writer, size int) (err error) {
 	defer recoverPanic(func(e error) {
 		debug("issue writing size: %v", e)
-	})
+	})()
 	bytes := SizeWriter(size)
 	_, err = writer.Write(bytes)
 	checkError(err)

@@ -39,7 +39,7 @@ type Nan0 struct {
  *******************/
 
 
-// Starts the listener for the given service
+// Starts the listener for this service
 func (ns *Service) Start() (net.Listener, error) {
 	return net.Listen("tcp", composeTcpAddress(ns.HostName, ns.Port))
 }
@@ -74,7 +74,7 @@ func (ns *Service) Refresh() {
 func (ns *Service) Register(host string, port int32) (err error) {
 	address := composeTcpAddress(host, port)
 	info("Registering '%v' service with discovery at '%v'", ns.ServiceName, address)
-	defer recoverPanic(func(e error) { err = e.(error) })
+	defer recoverPanic(func(e error) { err = e.(error) })()
 	conn, err := net.Dial("tcp", address)
 	checkError(err)
 	serviceList := &ServiceList{
@@ -106,7 +106,7 @@ func (ns *Service) DialTCP() (nan0 net.Conn, err error) {
 }
 
 // Create a connection to this nanoservice using the Nan0 wrapper around a protocol buffer service layer
-func (ns *Service) DialNan0(writeDeadlineActive bool, receiverMessageIdentity *proto.Message) (nan0 *Nan0, err error) {
+func (ns *Service) DialNan0(writeDeadlineActive bool, receiverMessageIdentity proto.Message) (nan0 *Nan0, err error) {
 	defer recoverPanic(func(e error) {
 		nan0 = &Nan0{
 			ServiceName:    ns.ServiceName,
@@ -118,9 +118,7 @@ func (ns *Service) DialNan0(writeDeadlineActive bool, receiverMessageIdentity *p
 			readerShutdown: nil,
 		}
 		err = e.(error)
-	})
-	_, err = net.Listen("tcp", composeTcpAddress(ns.HostName, ns.Port))
-	checkError(err)
+	})()
 	conn, err := net.Dial("tcp", composeTcpAddress(ns.HostName, ns.Port))
 	checkError(err)
 	nan0 = &Nan0{
@@ -140,14 +138,15 @@ func (ns *Service) DialNan0(writeDeadlineActive bool, receiverMessageIdentity *p
 
 // Start the active receiver for this Nan0 connection. This enables the 'receiver' channel,
 // constantly reads from the open connection and places the received message on receiver channel
-func (n *Nan0) startServiceReceiver(msg *proto.Message) {
+func (n *Nan0) startServiceReceiver(msg proto.Message) {
 	if n.conn != nil && !n.closed {
 		for ; ; {
 			n.conn.SetReadDeadline(time.Now().Add(TCPTimeout))
 
-			getMessageFromConnection(n.conn, msg)
+			newMsg := proto.Clone(msg)
+			getMessageFromConnection(n.conn, &newMsg)
 			// Send the message received to the awaiting receive buffer
-			n.receiver <- msg
+			n.receiver <- newMsg
 			select {
 			case <-n.readerShutdown:
 				n.writerShutdown <- true
@@ -167,9 +166,9 @@ func (n *Nan0) startServiceSender(writeDeadlineIsActive bool) {
 			if writeDeadlineIsActive {
 				n.conn.SetWriteDeadline(time.Now().Add(TCPTimeout))
 			}
-			pb := <-n.sender
-			putMessageInConnection(n.conn, pb)
 			select {
+			case pb := <-n.sender:
+				putMessageInConnection(n.conn, pb)
 			case <-n.writerShutdown:
 				n.readerShutdown <- true
 				info("Shutting down service writer for %v", n.ServiceName)
@@ -190,6 +189,8 @@ func (n *Nan0) Close() {
 	info("Reader stream for Nan0 server '%v' shutdown signal sent", n.ServiceName)
 	n.writerShutdown <- true
 	info("Writer stream for Nan0 server '%v' shutdown signal sent", n.ServiceName)
+	n.conn.Close()
+	info("Dialed connection for server %v closed after shutdown signal received", n.ServiceName)
 }
 
 // Return a write-only channel that is used to send a protocol buffer message through this connection
