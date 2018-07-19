@@ -261,8 +261,12 @@ func (ds *DiscoveryService) handleTcpClient(conn net.Conn) {
 	var err error = nil
 	defer conn.Close()
 	defer recoverPanic(func(e error) { err = e.(error) })()
-	//Read the data waiting on the connection and put it in the data buffer
-	_, err = io.Copy(ds, conn)
+	// Read the data waiting on the connection and put it in the data buffer
+	inc, err := io.Copy(ds, conn)
+	if inc == 0 {
+		// Write this object's contents to the waiting connection if no incoming was found
+		_, err = io.Copy(conn, ds)
+	}
 	checkError(err)
 }
 
