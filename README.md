@@ -28,7 +28,7 @@ should be aware of before using it:
         	"nan0"
         	"time"
         	"io"
-      	  "fmt"
+      	    "fmt"
         )
         
         //NOTE: Error checking omitted for demonstration purposes only, PLEASE be more vigilant in production systems.
@@ -78,44 +78,43 @@ should be aware of before using it:
         }
   ```
 * The **DiscoveryService** type defines a server that registers several nanoservices under a specified type and by name.
-```go
-package main
-
-import (
-	"nan0"
-	"time"
-	"net"
-	"io/ioutil"
-	"github.com/golang/protobuf/proto"
-)
-
-func main() {
-	// Create a DiscoveryService object
-	discoveryService := nan0.NewDiscoveryService(4677, 10)
-	
-	// Remember to shutdown
-	defer discoveryService.Shutdown()
-
-	// Create a nanoservice
-	ns := &nan0.Service{
-		ServiceType:"Test",
-		StartTime:time.Now().Unix(),
-		ServiceName:"TestService",
-		HostName:"::1",
-		Port:5555,
-		Expired: false,
-	}
-
-	// Register the service with the discovery service
-	ns.Register("::1", 4677)
-	
-	// Connect to discoveryService and read to fill ServiceList structure to get all services
-	conn, _ := net.Dial("tcp", "[::1]:4677")
-	b,_ := ioutil.ReadAll(conn)
-	services := &nan0.ServiceList{}
-	proto.Unmarshal(b, services)
-	
-	// Do something with available services
-	_ = services.ServicesAvailable
-}
-```
+  ```go package main
+    
+    import (
+        "nan0"
+        "time"
+        "net"
+        "io/ioutil"
+        "github.com/golang/protobuf/proto"
+    )
+    
+    func main() {
+        // Create a DiscoveryService object
+        discoveryService := nan0.NewDiscoveryService(4677, 10)
+        
+        // Remember to shutdown
+        defer discoveryService.Shutdown()
+    
+        // Create a nanoservice
+        ns := &nan0.Service{
+            ServiceType:"Test",
+            StartTime:time.Now().Unix(),
+            ServiceName:"TestService",
+            HostName:"::1",
+            Port:5555,
+            Expired: false,
+        }
+    
+        // Register the service with the discovery service
+        ns.Register("::1", 4677)
+        
+        // Connect to discoveryService and read to fill ServiceList structure to get all services
+        conn, _ := net.Dial("tcp", "[::1]:4677")
+        b,_ := ioutil.ReadAll(conn)
+        services := &nan0.ServiceList{}
+        proto.Unmarshal(b, services)
+        
+        // Do something with available services
+        _ = services.ServicesAvailable
+    }
+    ```
