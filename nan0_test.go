@@ -5,19 +5,20 @@ import (
 	"time"
 	"github.com/golang/protobuf/proto"
 	"fmt"
+	"io"
 )
 
 var nsDefaultPort int32 = 2324
 
 func TestNan0_Close(t *testing.T) {
 	ns := &Service{
-		ServiceName:"TestService",
-		Port: nsDefaultPort,
-		HostName: "localhost",
+		ServiceName: "TestService",
+		Port:        nsDefaultPort,
+		HostName:    "localhost",
 		ServiceType: "Test",
-		StartTime: time.Now().Unix(),
+		StartTime:   time.Now().Unix(),
 	}
-	listener,err := ns.Start()
+	listener, err := ns.Start()
 	if err != nil {
 		t.Fail()
 		fmt.Println(" \t\tTest Failed, ns.Start() failed \n\t\t")
@@ -26,7 +27,7 @@ func TestNan0_Close(t *testing.T) {
 	defer listener.Close()
 
 	serviceMsg := proto.Clone(new(Service))
-	n,err := ns.DialNan0(false, serviceMsg)
+	n, err := ns.DialNan0(false, serviceMsg, 0,0)
 	if n.closed == true {
 		t.Fail()
 		fmt.Println(" \t\tTest Failed, n.closed == true failed")
@@ -40,20 +41,27 @@ func TestNan0_Close(t *testing.T) {
 
 func TestNan0_GetReceiver(t *testing.T) {
 	ns := &Service{
-		ServiceName:"TestService",
-		Port: nsDefaultPort,
-		HostName: "localhost",
+		ServiceName: "TestService",
+		Port:        nsDefaultPort,
+		HostName:    "127.0.0.1",
 		ServiceType: "Test",
-		StartTime: time.Now().Unix(),
+		StartTime:   time.Now().Unix(),
 	}
-	listener,err := ns.Start()
+	listener, err := ns.Start()
 	if err != nil {
 		t.Fail()
 		fmt.Println(" \t\tTest Failed, ns.Start() failed")
 	}
 	defer listener.Close()
+	go func() {
+		conn, _ := listener.Accept()
+		for ; ; {
+			io.Copy(conn, conn)
+		}
+
+	}()
 	serviceMsg := proto.Clone(new(Service))
-	n,err := ns.DialNan0(false, serviceMsg)
+	n, err := ns.DialNan0(true, serviceMsg, 0,0)
 	if err != nil {
 		t.Fail()
 		fmt.Println("\t\tTest Failed, Nan0 failed to connect to service")
@@ -65,8 +73,8 @@ func TestNan0_GetReceiver(t *testing.T) {
 	waitingVal := <-receiver
 	if waitingVal.String() != ns.String() {
 		t.Fail()
-		fmt.Printf(" \t\tTest Failed, \n\t\tsent %v, \n\t\treceived: %v", ns, waitingVal)
+		fmt.Printf(" \t\tTest Failed, \n\t\tsent %v, \n\t\treceived: %v\n", ns, waitingVal)
+	} else {
+		fmt.Println("TestNan0_GetReceiver Passed")
 	}
 }
-
-

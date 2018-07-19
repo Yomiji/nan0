@@ -106,7 +106,7 @@ func (ns *Service) DialTCP() (nan0 net.Conn, err error) {
 }
 
 // Create a connection to this nanoservice using the Nan0 wrapper around a protocol buffer service layer
-func (ns *Service) DialNan0(writeDeadlineActive bool, receiverMessageIdentity proto.Message) (nan0 *Nan0, err error) {
+func (ns *Service) DialNan0(writeDeadlineActive bool, receiverMessageIdentity proto.Message, sendBuffer, receiveBuffer int) (nan0 *Nan0, err error) {
 	defer recoverPanic(func(e error) {
 		nan0 = &Nan0{
 			ServiceName:    ns.ServiceName,
@@ -123,8 +123,8 @@ func (ns *Service) DialNan0(writeDeadlineActive bool, receiverMessageIdentity pr
 	checkError(err)
 	nan0 = &Nan0{
 		ServiceName:    ns.ServiceName,
-		receiver:       make(chan proto.Message),
-		sender:         make(chan proto.Message),
+		receiver:       make(chan proto.Message, receiveBuffer),
+		sender:         make(chan proto.Message, sendBuffer),
 		conn:           conn,
 		closed:         false,
 		writerShutdown: make(chan bool, 1),
@@ -143,10 +143,16 @@ func (n *Nan0) startServiceReceiver(msg proto.Message) {
 		for ; ; {
 			n.conn.SetReadDeadline(time.Now().Add(TCPTimeout))
 
+			//b := make([]byte, 128)
+			//n.conn.Read(b)
+			//debug("New Message Received\n\t\tBytes: %v\n\t\tSize: %v", b, len(b))
 			newMsg := proto.Clone(msg)
-			getMessageFromConnection(n.conn, &newMsg)
-			// Send the message received to the awaiting receive buffer
-			n.receiver <- newMsg
+			err := getMessageFromConnection(n.conn, &newMsg)
+			if err == nil {
+				debug("sending %v on receiver", newMsg)
+				// Send the message received to the awaiting receive buffer
+				n.receiver <- newMsg
+			}
 			select {
 			case <-n.readerShutdown:
 				n.writerShutdown <- true
@@ -168,10 +174,11 @@ func (n *Nan0) startServiceSender(writeDeadlineIsActive bool) {
 			}
 			select {
 			case pb := <-n.sender:
+				debug("Sending message %v", pb)
 				putMessageInConnection(n.conn, pb)
 			case <-n.writerShutdown:
 				n.readerShutdown <- true
-				info("Shutting down service writer for %v", n.ServiceName)
+				info("Shutting down service sender for %v", n.ServiceName)
 				return
 			default:
 			}
@@ -191,6 +198,9 @@ func (n *Nan0) Close() {
 	info("Writer stream for Nan0 server '%v' shutdown signal sent", n.ServiceName)
 	n.conn.Close()
 	info("Dialed connection for server %v closed after shutdown signal received", n.ServiceName)
+	// wait until both goroutines are closed
+	<-n.readerShutdown
+	<-n.writerShutdown
 }
 
 // Return a write-only channel that is used to send a protocol buffer message through this connection

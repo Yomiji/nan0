@@ -2,7 +2,6 @@ package nan0
 
 import (
 	"encoding/binary"
-	"bufio"
 	"fmt"
 	"github.com/golang/protobuf/proto"
 	"net"
@@ -157,20 +156,25 @@ func putMessageInConnection(conn net.Conn, pb proto.Message) (err error) {
 	defer recoverPanic(func(e error) {
 		fail("Message failed to send: %v due to %v", pb, e)
 	})()
-	buffer := bufio.NewWriter(conn)
-	// write the preamble
-	buffer.Write(ProtoPreamble)
-	pbSize := proto.Size(pb)
-	// write the protobuf message size
-	writeSize(buffer, pbSize)
+	//buffer := bufio.NewWriter(conn)
+	// write the preamble, size and message
 	// marshal the protobuf message
 	v, err := proto.Marshal(pb)
 	checkError(err)
-	// send the message to the writer
-	n, err := buffer.Write(v)
-	if pbSize != n {
-		debug("discrepancy in number of bytes written for message. expected: %v, got: %v", pbSize, n)
+
+	protoSize := len(v)
+	//prepare all items
+	bigBytes := append(ProtoPreamble, SizeWriter(protoSize)...)
+	bigBytes = append(bigBytes, v...)
+
+	n, err := conn.Write(bigBytes)
+	checkError(err)
+	totalSize := len(ProtoPreamble) + SizeArrayWidth + protoSize
+	if totalSize != n {
+		debug("discrepancy in number of bytes written for message. expected: %v, got: %v", totalSize, n)
 		err = errors.New("message size discrepancy while sending")
+	} else {
+		debug("wrote message to connection with byte size: %v", len(ProtoPreamble) + SizeArrayWidth + n)
 	}
 	return err
 }
@@ -179,24 +183,34 @@ func putMessageInConnection(conn net.Conn, pb proto.Message) (err error) {
 // 	1. The preamble bytes stored in ProtoPreamble (defaults to 7 bytes)
 //	2. The size of the following protocol buffer message (defaults to 2 bytes)
 // 	3. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
-func getMessageFromConnection(conn net.Conn, pb proto.Message) (err error) {
+func getMessageFromConnection(conn net.Conn, pb *proto.Message) (err error) {
 	defer recoverPanic(func(e error) {
 		fail("Failed to receive message due to %v", e)
+		err = e
 	})()
-	buffer := bufio.NewReader(conn)
+
 	// check the preamble
-	isPreambleValid(buffer)
+	_,err = isPreambleValid(conn)
+	checkError(err)
+	// if the preamble is invalid, return the error and do not continue
+	//if !p {
+	//	return errors.New("preamble was not correctly received for response")
+	//}
+
 	// get the size of the next message
-	size := readSize(buffer)
+	size := readSize(conn)
 	// create a byte buffer that will store the whole expected message
 	v := make([]byte, size)
 	// get the protobuf bytes from the reader
-	count, err := buffer.Read(v)
+	count, err := conn.Read(v)
 	checkError(err)
+	debug("Read data %v", v)
+
 	// check the number of bytes received matches the bytes expected
 	if count == size {
+		debug("Unmarshaling")
 		// convert bytes to a protobuf message
-		err = proto.Unmarshal(v, pb)
+		err = proto.Unmarshal(v, *pb)
 		checkError(err)
 	} else {
 		err = errors.New("message size discrepancy while sending")
@@ -205,42 +219,33 @@ func getMessageFromConnection(conn net.Conn, pb proto.Message) (err error) {
 }
 
 // Checks the preamble bytes to determine if the expected matches
-func isPreambleValid(reader *bufio.Reader) (result bool) {
+func isPreambleValid(reader io.Reader) (result bool, err error) {
 	defer recoverPanic(func(e error) {
 		debug("preamble issue: %v", e)
 		result = false
+		err = e
 	})()
-	for i := 0; i < len(ProtoPreamble); i++ {
-		b, err := reader.ReadByte()
-		checkError(err)
-		if b != ProtoPreamble[i] {
-			return false
+	b := make([]byte, len(ProtoPreamble))
+	_, err = reader.Read(b)
+	checkError(err)
+	debug("checking %v against preamble %v", b, ProtoPreamble)
+	for i,v := range b {
+		if i < len(ProtoPreamble) && v != ProtoPreamble[i] {
+			return false, errors.New("preamble invalid")
 		}
 	}
-	return result
+	return result, err
 }
 
 // Grabs the next two bytes from the reader and figure out the size of the following protobuf message
-func readSize(reader *bufio.Reader) int {
+func readSize(reader io.Reader) int {
 	defer recoverPanic(func(e error) {
-		debug("issue reading size: %v", e)
+		warn("issue reading size: %v", e)
 	})()
 	bytes := make([]byte, SizeArrayWidth)
-	for i := 0; i < len(bytes); i++ {
-		b, err := reader.ReadByte()
-		checkError(err)
-		bytes[i] = b
-	}
-	return SizeReader(bytes)
-}
-
-// Submits the protobuf size value to the writer
-func writeSize(writer *bufio.Writer, size int) (err error) {
-	defer recoverPanic(func(e error) {
-		debug("issue writing size: %v", e)
-	})()
-	bytes := SizeWriter(size)
-	_, err = writer.Write(bytes)
+	_,err := reader.Read(bytes)
+	debug("read size array %v", bytes)
 	checkError(err)
-	return err
+
+	return SizeReader(bytes)
 }
