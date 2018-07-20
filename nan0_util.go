@@ -161,22 +161,22 @@ func putMessageInConnection(conn net.Conn, pb proto.Message, encryptKey *[32]byt
 	defer recoverPanic(func(e error) {
 		fail("Message failed to send: %v due to %v", pb, e)
 	})()
+
 	encrypted := encryptKey != nil && hmacKey != nil
-
-
-	// marshal the protobuf message
-	v, err := proto.Marshal(pb)
-	checkError(err)
 
 	var bigBytes []byte
 	if encrypted {
-		bigBytes = encryptProtobuf(v, encryptKey, hmacKey)
+		bigBytes = EncryptProtobuf(pb, encryptKey, hmacKey)
 	} else {
+		// marshal the protobuf message
+		v, err := proto.Marshal(pb)
+		checkError(err)
 		protoSize := len(v)
 		//prepare all items
 		bigBytes = append(ProtoPreamble, SizeWriter(protoSize)...)
 		bigBytes = append(bigBytes, v...)
 	}
+
 	// write the preamble, sizes and message
 	debug("Writing to connection")
 	n, err := conn.Write(bigBytes)
@@ -225,33 +225,44 @@ func getMessageFromConnection(conn net.Conn, pb *proto.Message, decryptKey *[32]
 	debug("Read data %v", v)
 
 	// check the number of bytes received matches the bytes expected
-	if count == size {
-		if encrypted {
-			decryptedBytes, err := Decrypt(v, decryptKey)
-			checkError(err)
-			mac := decryptedBytes[:hmacSize]
-			data := decryptedBytes[hmacSize:]
-			if CheckHMAC(data,mac,hmacKey) {
-				err = proto.Unmarshal(data, *pb)
-				checkError(err)
-			} else {
-				fail("Couldn't decrypt message, authentication failed")
-			}
-		} else {
-			err = proto.Unmarshal(v, *pb)
-		}
+	if count != size {
+		checkError(errors.New("message size discrepancy while sending"))
+	}
+	if encrypted {
+		err := DecryptProtobuf(v, pb, hmacSize, decryptKey, hmacKey)
+		checkError(err)
 	} else {
-		err = errors.New("message size discrepancy while sending")
+		err = proto.Unmarshal(v, *pb)
+		checkError(err)
 	}
 	return err
 }
 
+func DecryptProtobuf(rawData []byte, msg *proto.Message, hmacSize int, decryptKey *[32]byte, hmacKey *[32]byte) error {
+	decryptedBytes, err := Decrypt(rawData, decryptKey)
+	checkError(err)
+	mac := decryptedBytes[:hmacSize]
+	realData := decryptedBytes[hmacSize:]
+	if CheckHMAC(realData,mac,hmacKey) {
+		err = proto.Unmarshal(realData, *msg)
+		checkError(err)
+	} else {
+		fail("Couldn't decrypt message, authentication failed")
+		checkError(errors.New("authentication failed"))
+	}
+	return nil
+}
 
-func encryptProtobuf(rawData []byte, encryptKey *[32]byte, hmacKey *[32]byte) []byte {
+func EncryptProtobuf(pb proto.Message, encryptKey *[32]byte, hmacKey *[32]byte) []byte {
 	debug("Encrypting, Signing and Marshaling")
+	// marshall the message
+	rawData, err := proto.Marshal(pb)
+	checkError(err)
+
 	mac := GenerateHMAC(rawData, hmacKey)
 	macSize := len(mac)
 	data := append(mac, rawData...)
+
 	encryptedMsg, err := Encrypt(data, encryptKey)
 	encryptedMsgSize := len(encryptedMsg)
 	checkError(err)

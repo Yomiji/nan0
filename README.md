@@ -77,6 +77,41 @@ transport protocols, message handshaking and so forth. Here are the primary uses
         }
     }
   ```
+* You can create a secure service with authentication and encryption by creating ***Secret*** and ***Auth*** keys and
+  calling the **DialNan0Secure** method. There are also DecryptProtobuf and EncryptProtobuf for use in server code.
+  ```go
+    package main
+    
+    import (
+        "nan0"
+        "time"
+    )
+    
+    // establish secrets and pass them to your server and client
+    var secretKey = nan0.NewEncryptionKey()
+    var authKey = nan0.NewHMACKey()
+    
+    func main() {
+    	
+    	// create a new service to connect to
+        ns := &nan0.Service{
+            ServiceName: "TestService",
+            Port:        3234,
+            HostName:    "127.0.0.1",
+            ServiceType: "Test",
+            StartTime:   time.Now().Unix(),
+        }
+        
+        // use the resulting nanoservice connection
+        ns.DialNan0Secure(secretKey, authKey).
+            ToggleWriteDeadline(true).
+            MessageIdentity(ns).
+            SendBuffer(0).
+            ReceiveBuffer(0).
+        BuildNan0()
+    }
+  ```
+
 * The **DiscoveryService** type defines a server that registers several nanoservices under a specified type and by name.
   Connect to the DiscoveryService using a Dial to obtain the list of Services registered.
   ```go
@@ -155,7 +190,7 @@ the default settings may be more verbose than you need.
     ```
 
 ##### Planned Features
-* Bring Your Own Encryption, A function that is applied to the protocol buffer to encrypt/decrypt transmissions
-* Create a configuration for writer timeouts
+* Create a separate configuration for writer timeouts
 * Document modifying timeouts and increasing size of protobufs that can be transferred over wire
-* Implement and document externalizing configurations
+* Add godoc examples
+* Better documentation for encrypted nanoservices
