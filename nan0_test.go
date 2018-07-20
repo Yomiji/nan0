@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 	"github.com/golang/protobuf/proto"
-	"fmt"
 	"io"
 )
 
@@ -20,22 +19,18 @@ func TestNan0_Close(t *testing.T) {
 	}
 	listener, err := ns.Start()
 	if err != nil {
-		t.Fail()
-		fmt.Println(" \t\tTest Failed, ns.Start() failed \n\t\t")
-		return
+		t.Fatal(" \t\tTest Failed, ns.Start() failed \n\t\t")
 	}
 	defer listener.Close()
 
 	serviceMsg := proto.Clone(new(Service))
 	n, err := ns.DialNan0(false, serviceMsg, 0,0)
 	if n.closed == true {
-		t.Fail()
-		fmt.Println(" \t\tTest Failed, n.closed == true failed")
+		t.Fatal(" \t\tTest Failed, n.closed == true failed")
 	}
 	n.Close()
 	if n.closed != true {
-		t.Fail()
-		fmt.Println(" \t\tTest Failed, n.closed != true after closed")
+		t.Fatal(" \t\tTest Failed, n.closed != true after closed")
 	}
 }
 
@@ -49,8 +44,7 @@ func TestNan0_GetReceiver(t *testing.T) {
 	}
 	listener, err := ns.Start()
 	if err != nil {
-		t.Fail()
-		fmt.Println(" \t\tTest Failed, ns.Start() failed")
+		t.Fatal(" \t\tTest Failed, ns.Start() failed")
 	}
 	defer listener.Close()
 	go func() {
@@ -63,8 +57,7 @@ func TestNan0_GetReceiver(t *testing.T) {
 	serviceMsg := proto.Clone(new(Service))
 	n, err := ns.DialNan0(true, serviceMsg, 0,0)
 	if err != nil {
-		t.Fail()
-		fmt.Println("\t\tTest Failed, Nan0 failed to connect to service")
+		t.Fatal("\t\tTest Failed, Nan0 failed to connect to service")
 	}
 	defer n.Close()
 	sender := n.GetSender()
@@ -72,9 +65,50 @@ func TestNan0_GetReceiver(t *testing.T) {
 	sender <- ns
 	waitingVal := <-receiver
 	if waitingVal.String() != ns.String() {
-		t.Fail()
-		fmt.Printf(" \t\tTest Failed, \n\t\tsent %v, \n\t\treceived: %v\n", ns, waitingVal)
-	} else {
-		fmt.Println("TestNan0_GetReceiver Passed")
+		t.Fatalf(" \t\tTest Failed, \n\t\tsent %v, \n\t\treceived: %v\n", ns, waitingVal)
+	}
+}
+
+func TestService_DialNan0Secure(t *testing.T) {
+	ns := &Service{
+		ServiceName: "TestService",
+		Port:        nsDefaultPort,
+		HostName:    "127.0.0.1",
+		ServiceType: "Test",
+		StartTime:   time.Now().Unix(),
+	}
+	listener, err := ns.Start()
+	if err != nil {
+		t.Fatal(" \t\tTest Failed, ns.Start() failed")
+	}
+	defer listener.Close()
+	go func() {
+		conn, _ := listener.Accept()
+		for ; ; {
+			io.Copy(conn, conn)
+		}
+
+	}()
+	serviceMsg := proto.Clone(new(Service))
+	encryptionKey := NewEncryptionKey()
+	hmacKey := NewHMACKey()
+
+	n, err := ns.DialNan0Secure(encryptionKey, hmacKey).
+		ToggleWriteDeadline(true).
+		MessageIdentity(serviceMsg).
+		SendBuffer(0).
+		ReceiveBuffer(0).
+	BuildNan0()
+
+	if err != nil {
+		t.Fatal("\t\tTest Failed, Nan0 failed to connect to service")
+	}
+	defer n.Close()
+	sender := n.GetSender()
+	receiver := n.GetReceiver()
+	sender <- ns
+	waitingVal := <-receiver
+	if waitingVal.String() != ns.String() {
+		t.Fatalf(" \t\tTest Failed, \n\t\tsent %v, \n\t\treceived: %v\n", ns, waitingVal)
 	}
 }

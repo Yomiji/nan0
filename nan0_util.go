@@ -10,6 +10,11 @@ import (
 	"log"
 	"errors"
 	"io"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/hmac"
+	"crypto/sha512"
 )
 
 /*************
@@ -21,12 +26,12 @@ import (
 // 	Info: Standard Output - 'Nan0 [INFO] %date% %time% %filename:line%'
 // 	Warn: Standard Error - 'Nan0 [DEBUG] %date% %time% %filename:line%'
 // 	Error: Standard Error - 'Nan0 [ERROR] %date% %time% %filename:line%'
-// 	Debug: Standard Output - 'Nan0 [DEBUG] %date% %time% %filename:line%'
+// 	Debug: Disabled by default
 var (
-	Info  = log.New(os.Stdout, "Nan0 [INFO]: ", log.Ldate|log.Ltime|log.Lshortfile)
-	Warn  = log.New(os.Stderr, "Nan0 [WARN]: ", log.Ldate|log.Ltime|log.Lshortfile)
-	Error = log.New(os.Stderr, "Nan0 [ERROR]: ", log.Ldate|log.Ltime|log.Lshortfile)
-	Debug = log.New(os.Stdout, "Nan0 [DEBUG]: ", log.Ldate|log.Ltime|log.Lshortfile)
+	Info  = log.New(os.Stdout, "Nan0 [INFO]: ", log.Ldate|log.Ltime)
+	Warn  = log.New(os.Stderr, "Nan0 [WARN]: ", log.Ldate|log.Ltime)
+	Error = log.New(os.Stderr, "Nan0 [ERROR]: ", log.Ldate|log.Ltime)
+	Debug *log.Logger = nil
 )
 
 // Wrapper around the Info global log that allows for this api to log to that level correctly
@@ -152,24 +157,33 @@ func recoverPanic(errfunc func(error)) func() {
 // 	1. The preamble bytes stored in ProtoPreamble (defaults to 7 bytes)
 //	2. The size of the following protocol buffer message (defaults to 2 bytes)
 // 	3. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
-func putMessageInConnection(conn net.Conn, pb proto.Message) (err error) {
+func putMessageInConnection(conn net.Conn, pb proto.Message, encryptKey *[32]byte, hmacKey *[32]byte) (err error) {
 	defer recoverPanic(func(e error) {
 		fail("Message failed to send: %v due to %v", pb, e)
 	})()
-	//buffer := bufio.NewWriter(conn)
-	// write the preamble, size and message
+	encrypted := encryptKey != nil && hmacKey != nil
+
+
 	// marshal the protobuf message
 	v, err := proto.Marshal(pb)
 	checkError(err)
 
-	protoSize := len(v)
-	//prepare all items
-	bigBytes := append(ProtoPreamble, SizeWriter(protoSize)...)
-	bigBytes = append(bigBytes, v...)
-
+	var bigBytes []byte
+	if encrypted {
+		bigBytes = encryptProtobuf(v, encryptKey, hmacKey)
+	} else {
+		protoSize := len(v)
+		//prepare all items
+		bigBytes = append(ProtoPreamble, SizeWriter(protoSize)...)
+		bigBytes = append(bigBytes, v...)
+	}
+	// write the preamble, sizes and message
+	debug("Writing to connection")
 	n, err := conn.Write(bigBytes)
 	checkError(err)
-	totalSize := len(ProtoPreamble) + SizeArrayWidth + protoSize
+
+	// check the full buffer was written
+	totalSize := len(bigBytes)
 	if totalSize != n {
 		debug("discrepancy in number of bytes written for message. expected: %v, got: %v", totalSize, n)
 		err = errors.New("message size discrepancy while sending")
@@ -183,20 +197,24 @@ func putMessageInConnection(conn net.Conn, pb proto.Message) (err error) {
 // 	1. The preamble bytes stored in ProtoPreamble (defaults to 7 bytes)
 //	2. The size of the following protocol buffer message (defaults to 2 bytes)
 // 	3. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
-func getMessageFromConnection(conn net.Conn, pb *proto.Message) (err error) {
+func getMessageFromConnection(conn net.Conn, pb *proto.Message, decryptKey *[32]byte, hmacKey *[32]byte) (err error) {
 	defer recoverPanic(func(e error) {
 		fail("Failed to receive message due to %v", e)
 		err = e
 	})()
 
-	// check the preamble
-	_,err = isPreambleValid(conn)
-	checkError(err)
-	// if the preamble is invalid, return the error and do not continue
-	//if !p {
-	//	return errors.New("preamble was not correctly received for response")
-	//}
+	// determine if this is an encrypted msg
+	encrypted := decryptKey != nil && hmacKey != nil
 
+	// check the preamble
+	err = isPreambleValid(conn)
+	checkError(err)
+
+	// get the size of the hmac if it is encrypted
+	var hmacSize int
+	if encrypted {
+		hmacSize = readSize(conn)
+	}
 	// get the size of the next message
 	size := readSize(conn)
 	// create a byte buffer that will store the whole expected message
@@ -208,21 +226,47 @@ func getMessageFromConnection(conn net.Conn, pb *proto.Message) (err error) {
 
 	// check the number of bytes received matches the bytes expected
 	if count == size {
-		debug("Unmarshaling")
-		// convert bytes to a protobuf message
-		err = proto.Unmarshal(v, *pb)
-		checkError(err)
+		if encrypted {
+			decryptedBytes, err := Decrypt(v, decryptKey)
+			checkError(err)
+			mac := decryptedBytes[:hmacSize]
+			data := decryptedBytes[hmacSize:]
+			if CheckHMAC(data,mac,hmacKey) {
+				err = proto.Unmarshal(data, *pb)
+				checkError(err)
+			} else {
+				fail("Couldn't decrypt message, authentication failed")
+			}
+		} else {
+			err = proto.Unmarshal(v, *pb)
+		}
 	} else {
 		err = errors.New("message size discrepancy while sending")
 	}
 	return err
 }
 
+
+func encryptProtobuf(rawData []byte, encryptKey *[32]byte, hmacKey *[32]byte) []byte {
+	debug("Encrypting, Signing and Marshaling")
+	mac := GenerateHMAC(rawData, hmacKey)
+	macSize := len(mac)
+	data := append(mac, rawData...)
+	encryptedMsg, err := Encrypt(data, encryptKey)
+	encryptedMsgSize := len(encryptedMsg)
+	checkError(err)
+	result := append(ProtoPreamble, SizeWriter(macSize)...)
+	result = append(result, SizeWriter(encryptedMsgSize)...)
+	result = append(result, encryptedMsg...)
+	debug("Encrypt complete, result: %v", result)
+	return result
+}
+
+
 // Checks the preamble bytes to determine if the expected matches
-func isPreambleValid(reader io.Reader) (result bool, err error) {
+func isPreambleValid(reader io.Reader) (err error) {
 	defer recoverPanic(func(e error) {
 		debug("preamble issue: %v", e)
-		result = false
 		err = e
 	})()
 	b := make([]byte, len(ProtoPreamble))
@@ -231,10 +275,10 @@ func isPreambleValid(reader io.Reader) (result bool, err error) {
 	debug("checking %v against preamble %v", b, ProtoPreamble)
 	for i,v := range b {
 		if i < len(ProtoPreamble) && v != ProtoPreamble[i] {
-			return false, errors.New("preamble invalid")
+			return errors.New("preamble invalid")
 		}
 	}
-	return result, err
+	return  err
 }
 
 // Grabs the next two bytes from the reader and figure out the size of the following protobuf message
@@ -248,4 +292,107 @@ func readSize(reader io.Reader) int {
 	checkError(err)
 
 	return SizeReader(bytes)
+}
+
+// NewEncryptionKey generates a random 256-bit key for Encrypt() and
+// Decrypt(). It panics if the source of randomness fails.
+func NewEncryptionKey() *[32]byte {
+	key := [32]byte{}
+	_, err := io.ReadFull(rand.Reader, key[:])
+	if err != nil {
+		panic(err)
+	}
+	return &key
+}
+
+// Encrypt encrypts data using 256-bit AES-GCM.  This both hides the content of
+// the data and provides a check that it hasn't been altered. Output takes the
+// form nonce|ciphertext|tag where '|' indicates concatenation.
+func Encrypt(plaintext []byte, key *[32]byte) (ciphertext []byte, err error) {
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return nil, err
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+
+	nonce := make([]byte, gcm.NonceSize())
+	_, err = io.ReadFull(rand.Reader, nonce)
+	if err != nil {
+		return nil, err
+	}
+
+	return gcm.Seal(nonce, nonce, plaintext, nil), nil
+}
+
+// Decrypt decrypts data using 256-bit AES-GCM.  This both hides the content of
+// the data and provides a check that it hasn't been altered. Expects input
+// form nonce|ciphertext|tag where '|' indicates concatenation.
+func Decrypt(ciphertext []byte, key *[32]byte) (plaintext []byte, err error) {
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return nil, err
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(ciphertext) < gcm.NonceSize() {
+		return nil, errors.New("malformed ciphertext")
+	}
+
+	return gcm.Open(nil,
+		ciphertext[:gcm.NonceSize()],
+		ciphertext[gcm.NonceSize():],
+		nil,
+	)
+}
+
+// NewHMACKey generates a random 256-bit secret key for HMAC use.
+// Because key generation is critical, it panics if the source of randomness fails.
+func NewHMACKey() *[32]byte {
+
+	key := &[32]byte{}
+
+	_, err := io.ReadFull(rand.Reader, key[:])
+
+	if err != nil {
+
+		panic(err)
+
+	}
+
+	return key
+
+}
+
+
+
+// GenerateHMAC produces a symmetric signature using a shared secret key.
+func GenerateHMAC(data []byte, key *[32]byte) []byte {
+
+	h := hmac.New(sha512.New512_256, key[:])
+
+	h.Write(data)
+
+	return h.Sum(nil)
+
+
+
+}
+
+
+
+// CheckHMAC securely checks the supplied MAC against a message using the shared secret key.
+func CheckHMAC(data, suppliedMAC []byte, key *[32]byte) bool {
+
+	expectedMAC := GenerateHMAC(data, key)
+
+	return hmac.Equal(expectedMAC, suppliedMAC)
+
 }

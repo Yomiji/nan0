@@ -5,18 +5,11 @@ import (
 	"fmt"
 	"time"
 	"io"
-	"os"
 )
 
 var (
 	dsDefaultPort int32 = 4345
 )
-
-func TestMain(m *testing.M) {
-	NoLogging()
-	os.Exit(m.Run())
-}
-
 
 func TestNanoDiscoveryCreationWithoutCorrectPortShouldFail(t *testing.T) {
 	fmt.Println(">>> Running Nano Discovery Creation with Incorrect Port Test <<<")
