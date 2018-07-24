@@ -97,7 +97,7 @@ var TCPTimeout = 10 * time.Second
 var ProtoPreamble = []byte{0x01, 0x02, 0x03, 0xFF, 0x03, 0x02, 0x01}
 
 // The default array width provided with this API, this is the default value of the SizeArrayWidth
-const defaultArrayWidth = 2
+const defaultArrayWidth = 8
 
 // The number of bytes that constitute the size of the proto.Message sent/received
 // This variable is made visible so that developers can support larger data sizes
@@ -107,15 +107,15 @@ var SizeArrayWidth = defaultArrayWidth
 // NOTE: If you change SizeArrayWidth, you should also change this function
 // This function is made visible so that developers can support larger data sizes
 var SizeReader = func(bytes []byte) int {
-	return int(binary.BigEndian.Uint16(bytes))
+	return int(binary.BigEndian.Uint64(bytes))
 }
 
 // Converts the integer representing the size of the following protobuf message to a byte slice
 // NOTE: If you change SizeReader, you should also change this function
-// This function is made visible so that developers can support larger data sizes
+// This function is made visible so that developers can support variable data sizes
 var SizeWriter = func(size int) (bytes []byte) {
 	bytes = make([]byte, SizeArrayWidth)
-	binary.BigEndian.PutUint16(bytes, uint16(size))
+	binary.BigEndian.PutUint64(bytes, uint64(size))
 	return bytes
 }
 
