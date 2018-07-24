@@ -23,9 +23,9 @@ import (
 
 //Loggers provided:
 //  Level | Output | Format
-// 	Info: Standard Output - 'Nan0 [INFO] %date% %time% %filename:line%'
-// 	Warn: Standard Error - 'Nan0 [DEBUG] %date% %time% %filename:line%'
-// 	Error: Standard Error - 'Nan0 [ERROR] %date% %time% %filename:line%'
+// 	Info: Standard Output - 'Nan0 [INFO] %date% %time%'
+// 	Warn: Standard Error - 'Nan0 [DEBUG] %date% %time%'
+// 	Error: Standard Error - 'Nan0 [ERROR] %date% %time%'
 // 	Debug: Disabled by default
 var (
 	Info  = log.New(os.Stdout, "Nan0 [INFO]: ", log.Ldate|log.Ltime)
@@ -72,16 +72,16 @@ func NoLogging() {
 
 func SetLogWriter( w io.Writer ) {
 	if Info != nil {
-		Info = log.New(w, "Nan0 [INFO]: ", log.Ldate|log.Ltime|log.Lshortfile)
+		Info = log.New(w, "Nan0 [INFO]: ", log.Ldate|log.Ltime)
 	}
 	if Warn != nil {
-		Warn  = log.New(w, "Nan0 [WARN]: ", log.Ldate|log.Ltime|log.Lshortfile)
+		Warn  = log.New(w, "Nan0 [WARN]: ", log.Ldate|log.Ltime)
 	}
 	if Error != nil {
-		Error = log.New(w, "Nan0 [ERROR]: ", log.Ldate|log.Ltime|log.Lshortfile)
+		Error = log.New(w, "Nan0 [ERROR]: ", log.Ldate|log.Ltime)
 	}
 	if Debug != nil {
-		Debug = log.New(w, "Nan0 [DEBUG]: ", log.Ldate|log.Ltime|log.Lshortfile)
+		Debug = log.New(w, "Nan0 [DEBUG]: ", log.Ldate|log.Ltime)
 	}
 }
 
@@ -238,34 +238,57 @@ func getMessageFromConnection(conn net.Conn, pb *proto.Message, decryptKey *[32]
 	return err
 }
 
-func DecryptProtobuf(rawData []byte, msg *proto.Message, hmacSize int, decryptKey *[32]byte, hmacKey *[32]byte) error {
+// Decrypts, authenticates and unmarshals a protobuf message using the given encrypt/decrypt key and hmac key
+func DecryptProtobuf(rawData []byte, msg *proto.Message, hmacSize int, decryptKey *[32]byte, hmacKey *[32]byte) (err error) {
+	debug("Decrypting a byte slice of size %v", len(rawData))
+	defer recoverPanic(func(e error) {
+		fail("decryption issue: %v", e)
+		err = e
+	})()
+
+	// decrypt message
 	decryptedBytes, err := Decrypt(rawData, decryptKey)
 	checkError(err)
+
+	// split the hmac signature from the real data based hmacSize
 	mac := decryptedBytes[:hmacSize]
 	realData := decryptedBytes[hmacSize:]
+
+	// check the hmac signature to ensure authenticity
 	if CheckHMAC(realData,mac,hmacKey) {
+		// unmarshal the bytes, placing result into msg
 		err = proto.Unmarshal(realData, *msg)
 		checkError(err)
+		debug("Decrypt completed successfully, result: %v", msg)
 	} else {
+		// fail out if the message authenticity cannot be verified
 		fail("Couldn't decrypt message, authentication failed")
 		checkError(errors.New("authentication failed"))
 	}
-	return nil
+	return err
 }
 
+// Signs and encrypts a marshalled protobuf message using the given encrypt/decrypt key and hmac key
 func EncryptProtobuf(pb proto.Message, encryptKey *[32]byte, hmacKey *[32]byte) []byte {
-	debug("Encrypting, Signing and Marshaling")
-	// marshall the message
+	debug("Encrypting %v", pb)
+	defer recoverPanic(func(e error) {
+		fail("decryption issue: %v", e)
+	})()
+	// marshall the message, turning it into bytes
 	rawData, err := proto.Marshal(pb)
 	checkError(err)
 
+	// sign the data
 	mac := GenerateHMAC(rawData, hmacKey)
 	macSize := len(mac)
 	data := append(mac, rawData...)
 
+	// encrypt the data
 	encryptedMsg, err := Encrypt(data, encryptKey)
 	encryptedMsgSize := len(encryptedMsg)
 	checkError(err)
+
+	// build the byte slice that will be the TCP packet sent on the tcp stream
 	result := append(ProtoPreamble, SizeWriter(macSize)...)
 	result = append(result, SizeWriter(encryptedMsgSize)...)
 	result = append(result, encryptedMsg...)
@@ -305,6 +328,8 @@ func readSize(reader io.Reader) int {
 	return SizeReader(bytes)
 }
 
+// From cryptopasta (https://github.com/gtank/cryptopasta)
+//
 // NewEncryptionKey generates a random 256-bit key for Encrypt() and
 // Decrypt(). It panics if the source of randomness fails.
 func NewEncryptionKey() *[32]byte {
@@ -316,6 +341,8 @@ func NewEncryptionKey() *[32]byte {
 	return &key
 }
 
+// From cryptopasta (https://github.com/gtank/cryptopasta)
+//
 // Encrypt encrypts data using 256-bit AES-GCM.  This both hides the content of
 // the data and provides a check that it hasn't been altered. Output takes the
 // form nonce|ciphertext|tag where '|' indicates concatenation.
@@ -339,6 +366,8 @@ func Encrypt(plaintext []byte, key *[32]byte) (ciphertext []byte, err error) {
 	return gcm.Seal(nonce, nonce, plaintext, nil), nil
 }
 
+// From cryptopasta (https://github.com/gtank/cryptopasta)
+//
 // Decrypt decrypts data using 256-bit AES-GCM.  This both hides the content of
 // the data and provides a check that it hasn't been altered. Expects input
 // form nonce|ciphertext|tag where '|' indicates concatenation.
@@ -364,6 +393,8 @@ func Decrypt(ciphertext []byte, key *[32]byte) (plaintext []byte, err error) {
 	)
 }
 
+// From cryptopasta (https://github.com/gtank/cryptopasta)
+//
 // NewHMACKey generates a random 256-bit secret key for HMAC use.
 // Because key generation is critical, it panics if the source of randomness fails.
 func NewHMACKey() *[32]byte {
@@ -379,11 +410,10 @@ func NewHMACKey() *[32]byte {
 	}
 
 	return key
-
 }
 
-
-
+// From cryptopasta (https://github.com/gtank/cryptopasta)
+//
 // GenerateHMAC produces a symmetric signature using a shared secret key.
 func GenerateHMAC(data []byte, key *[32]byte) []byte {
 
@@ -392,18 +422,14 @@ func GenerateHMAC(data []byte, key *[32]byte) []byte {
 	h.Write(data)
 
 	return h.Sum(nil)
-
-
-
 }
 
-
-
+// From cryptopasta (https://github.com/gtank/cryptopasta)
+//
 // CheckHMAC securely checks the supplied MAC against a message using the shared secret key.
 func CheckHMAC(data, suppliedMAC []byte, key *[32]byte) bool {
 
 	expectedMAC := GenerateHMAC(data, key)
 
 	return hmac.Equal(expectedMAC, suppliedMAC)
-
 }

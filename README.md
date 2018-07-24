@@ -189,8 +189,127 @@ the default settings may be more verbose than you need.
       }
     ```
 
+##### Security Features
+Security in Nan0 takes place at the connection level. The underlying network packets have the following structure
+(constructed in the step order):
+
+1. Message header preamble (by default 7 bytes)
+2. HMAC size header (8 bytes max)
+3. Size header (8 bytes max)
+4. Encrypted bytes (length of "Size header" bytes)
+
+Inside the encrypted bytes, a marshalled protobuf is signed using the HMAC key to provide a layer of authentication.
+
+To utilize the encryption features, you must first create a private encryption key and an hmac authentication key, these
+keys need to be used with the server and client.
+
+```go
+package main
+
+import (
+	"nan0"
+	"encoding/base64"
+)
+
+// A simple function to make the keys generated a sharable string
+func shareKeys() (encKeyShare, authKeyShare string) {
+	encKeyBytes := nan0.NewEncryptionKey()
+	authKeyBytes := nan0.NewHMACKey()
+	
+	encKeyShare = base64.StdEncoding.EncodeToString(encKeyBytes[:])
+	authKeyShare = base64.StdEncoding.EncodeToString(authKeyBytes[:])
+	
+	return
+}
+
+// The nan0 functions require a specific key type and width, this is a way to make 
+// that conversion from strings to the required type.
+//NOTE: Error checking omitted for demonstration purposes only, PLEASE be more vigilant in production systems.
+func keysToNan0Bytes(encKeyShare, authKeyShare string) (encKey, authKey *[32]byte) {
+	encKeyBytes,_ := base64.StdEncoding.DecodeString(encKeyShare)
+	authkeyBytes,_ := base64.StdEncoding.DecodeString(authKeyShare)
+	
+	copy(encKey[:], encKeyBytes)
+	copy(authKey[:], authkeyBytes)
+	
+	return
+} 
+```
+
+The server will use the EncryptProtobuf and DecryptProtobuf functions to construct messages passed to the client. The
+encryption is mostly abstracted from clients, messages can be retrieved or sent on the streams without regard to the
+encryption protocol, however, you must use DialNan0Secure method on their client instead of DialNan0.
+```go
+package main
+
+import (
+	"nan0"
+	"time"
+	"fmt"
+)
+
+func main() {
+	// Create a nan0 service
+	service := &nan0.Service{
+		ServiceName: "TestService",
+		Port:        4546,
+		HostName:    "127.0.0.1",
+		ServiceType: "Test",
+		StartTime:   time.Now().Unix(),
+	}
+
+	// Start a server
+	listener, _ := service.Start()
+
+	// Shutdown when finished
+	defer listener.Close()
+
+	// Trivially create encryption and signing keys
+	encKey := nan0.NewEncryptionKey()
+	authKey := nan0.NewHMACKey()
+	
+	// Create an echo service, every protocol buffer sent to this service will be echoed back
+	go func() {
+		conn, _ := listener.Accept()
+		for ; ; {
+			// whenever we receive something, send the service, encrypted
+			conn.Write(nan0.EncryptProtobuf(service, encKey, authKey))
+		}
+	}()
+
+	// Establish a secure client connection
+	comm,_ := service.DialNan0Secure(encKey, authKey).
+		ToggleWriteDeadline(true).
+		MessageIdentity(service).
+		SendBuffer(0).
+		ReceiveBuffer(0).
+	BuildNan0()
+
+	// Shutdown when finished
+	defer comm.Close()
+
+	// The nan0.Nan0 allows for sending and receiving protobufs on channels for communication
+	sender := comm.GetSender()
+	receiver := comm.GetReceiver()
+
+	// Send a protocol buffer, yes nan0.Service is a protobuf type
+	sender <- service
+	
+	// Wait to receive a response, which should be the service as sent above (we ignored the sender silently)
+	result := <-receiver
+
+	// Test the results, should be the same
+	if service.String() == result.String() {
+		fmt.Println("Service was echoed back")
+	}
+}
+```
+
+The security framework is based off of [cryptopasta](https://github.com/gtank/cryptopasta) so you should check this
+project out for more information on the actual implementation of security methods.
+
+
 ##### Planned Features
 * Create a separate configuration for writer timeouts
-* Document modifying timeouts and increasing size of protobufs that can be transferred over wire
+* Document nan0 settings
 * Add godoc examples
-* Better documentation for encrypted nanoservices
