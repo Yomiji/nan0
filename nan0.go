@@ -21,9 +21,9 @@ type Nan0 struct {
 	// The name of the service
 	ServiceName string
 	// Receive messages from this channel
-	receiver chan proto.Message
+	receiver chan interface{}
 	// Messages placed on this channel will be sent
-	sender chan proto.Message
+	sender chan interface{}
 	// A connection maintained by this object
 	conn net.Conn
 	// The closed status
@@ -163,8 +163,8 @@ func (sec *SecureNanoBuilder) BuildNan0() (nan0 *Nan0, err error) {
 	checkError(err)
 	nan0 = &Nan0{
 		ServiceName:    sec.ns.ServiceName,
-		receiver:       make(chan proto.Message, sec.receiveBuffer),
-		sender:         make(chan proto.Message, sec.sendBuffer),
+		receiver:       make(chan interface{}, sec.receiveBuffer),
+		sender:         make(chan interface{}, sec.sendBuffer),
 		conn:           conn,
 		closed:         false,
 		writerShutdown: make(chan bool, 1),
@@ -230,7 +230,7 @@ func (n *Nan0) startServiceSender(writeDeadlineIsActive bool, encryptKey *[32]by
 			select {
 			case pb := <-n.sender:
 				debug("Sending message %v", pb)
-				putMessageInConnection(n.conn, pb, encryptKey, hmacKey)
+				putMessageInConnection(n.conn, pb.(proto.Message), encryptKey, hmacKey)
 			case <-n.writerShutdown:
 				n.readerShutdown <- true
 				info("Shutting down service sender for %v", n.ServiceName)
@@ -259,11 +259,11 @@ func (n *Nan0) Close() {
 }
 
 // Return a write-only channel that is used to send a protocol buffer message through this connection
-func (n *Nan0) GetSender() chan<- proto.Message {
+func (n *Nan0) GetSender() chan<- interface{} {
 	return n.sender
 }
 
 // Returns a read-only channel that is used to receive a protocol buffer message returned through this connection
-func (n *Nan0) GetReceiver() <-chan proto.Message {
+func (n *Nan0) GetReceiver() <-chan interface{} {
 	return n.receiver
 }

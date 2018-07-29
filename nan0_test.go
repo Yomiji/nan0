@@ -64,7 +64,7 @@ func TestNan0_GetReceiver(t *testing.T) {
 	receiver := n.GetReceiver()
 	sender <- ns
 	waitingVal := <-receiver
-	if waitingVal.String() != ns.String() {
+	if waitingVal.(proto.Message).String() != ns.String() {
 		t.Fatalf(" \t\tTest Failed, \n\t\tsent %v, \n\t\treceived: %v\n", ns, waitingVal)
 	}
 }
@@ -108,7 +108,7 @@ func TestService_DialNan0Secure(t *testing.T) {
 	receiver := n.GetReceiver()
 	sender <- ns
 	waitingVal := <-receiver
-	if waitingVal.String() != ns.String() {
+	if waitingVal.(proto.Message).String() != ns.String() {
 		t.Fatalf(" \t\tTest Failed, \n\t\tsent %v, \n\t\treceived: %v\n", ns, waitingVal)
 	}
 }
