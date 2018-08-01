@@ -308,6 +308,9 @@ func main() {
 The security framework is based off of [cryptopasta](https://github.com/gtank/cryptopasta) so you should check this
 project out for more information on the actual implementation of security methods.
 
+##### Demo Project
+There is a demo project created using the Nan0 API called [Nan0Chat](https://github.com/Yomiji/nan0chat) . This is a chat application that utilizes the
+features in Nan0 to communicate securely between a server and multiple clients.
 
 ##### Planned Features
 * Create a separate configuration for writer timeouts
