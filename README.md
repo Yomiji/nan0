@@ -22,60 +22,60 @@ transport protocols, message handshaking and so forth. Here are the primary uses
   quickly establish a Service, just instantiate a Service object and call the member function Start on it. You will
   still need to take the listener returned from this function and create a server:
   ```go
-    package main
-    
-    import (
-        "nan0"
-        "time"
-        "io"
-        "fmt"
-    )
-    
-    //NOTE: Error checking omitted for demonstration purposes only, PLEASE be more vigilant in production systems.
-    func main() {
-        // Create a nan0 service
-        service := &nan0.Service{
-            ServiceName: "TestService",
-            Port:        4546,
-            HostName:    "127.0.0.1",
-            ServiceType: "Test",
-            StartTime:   time.Now().Unix(),
-        }
-        
-        // Start a server
-        listener, _ := service.Start()
-        
-        // Shutdown when finished
-        defer listener.Close()
-        
-        // Create an echo service, every protocol buffer sent to this service will be echoed back
-        go func() {
-            conn, _ := listener.Accept()
-            for ; ; {
-                io.Copy(conn, conn)
-            }
-        }()
-        
-        // Establish a client connection
-        comm,_ := service.DialNan0(false, service, 0, 0)
-        
-        // Shutdown when finished
-        defer comm.Close()
-        
-        // The nan0.Nan0 allows for sending and receiving protobufs on channels for communication
-        sender := comm.GetSender()
-        receiver := comm.GetReceiver()
-        
-        // Send a protocol buffer, yes nan0.Service is a protobuf type
-        sender <- service
-        // Wait to receive a response, which should be the Service back again in this case due to the echo code above
-        result := <-receiver
-        
-        // Test the results, should be the same
-        if service.String() == result.String() {
-            fmt.Println("Service was echoed back")
-        }
-    }
+      package main
+      
+      import (
+          "nan0"
+          "time"
+          "io"
+          "fmt"
+      )
+      
+      //NOTE: Error checking omitted for demonstration purposes only, PLEASE be more vigilant in production systems.
+      func main() {
+          // Create a nan0 service
+          service := &nan0.Service{
+              ServiceName: "TestService",
+              Port:        4546,
+              HostName:    "127.0.0.1",
+              ServiceType: "Test",
+              StartTime:   time.Now().Unix(),
+          }
+          
+          // Start a server
+          listener, _ := service.Start()
+          
+          // Shutdown when finished
+          defer listener.Close()
+          
+          // Create an echo service, every protocol buffer sent to this service will be echoed back
+          go func() {
+              conn, _ := listener.Accept()
+              for ; ; {
+                  io.Copy(conn, conn)
+              }
+          }()
+          
+          // Establish a client connection
+          comm,_ := service.DialNan0(false, service, 0, 0)
+          
+          // Shutdown when finished
+          defer comm.Close()
+          
+          // The nan0.Nan0 allows for sending and receiving protobufs on channels for communication
+          sender := comm.GetSender()
+          receiver := comm.GetReceiver()
+          
+          // Send a protocol buffer, yes nan0.Service is a protobuf type
+          sender <- service
+          // Wait to receive a response, which should be the Service back again in this case due to the echo code above
+          result := <-receiver
+          
+          // Test the results, should be the same
+          if service.String() == result.(nan0.Service).String() {
+              fmt.Println("Service was echoed back")
+          }
+      }
   ```
 * You can create a secure service with authentication and encryption by creating ***Secret*** and ***Auth*** keys and
   calling the **DialNan0Secure** method. There are also DecryptProtobuf and EncryptProtobuf for use in server code.
@@ -299,7 +299,7 @@ func main() {
 	result := <-receiver
 
 	// Test the results, should be the same
-	if service.String() == result.String() {
+	if service.String() == result.(nan0.Service).String() {
 		fmt.Println("Service was echoed back")
 	}
 }
