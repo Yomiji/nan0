@@ -12,7 +12,7 @@ transport protocols, message handshaking and so forth. Here are the primary uses
   readme or simply call the NoLogging function to disable logging from this framework:
   ```go
     package main
-    import "nan0"
+    import "github.com/Yomiji/nan0"
     
     func init() {
         nan0.NoLogging()
@@ -25,7 +25,7 @@ transport protocols, message handshaking and so forth. Here are the primary uses
       package main
       
       import (
-          "nan0"
+          "github.com/Yomiji/nan0"
           "time"
           "io"
           "fmt"
@@ -83,7 +83,7 @@ transport protocols, message handshaking and so forth. Here are the primary uses
     package main
     
     import (
-        "nan0"
+        "github.com/Yomiji/nan0"
         "time"
     )
     
@@ -118,7 +118,7 @@ transport protocols, message handshaking and so forth. Here are the primary uses
     package main
     
     import (
-        "nan0"
+        "github.com/Yomiji/nan0"
         "time"
         "net"
         "io/ioutil"
@@ -168,7 +168,7 @@ the default settings may be more verbose than you need.
     ```go
       package main
       
-      import "nan0"
+      import "github.com/Yomiji/nan0"
       
       func main() {
       	nan0.Debug = nil
@@ -179,7 +179,7 @@ the default settings may be more verbose than you need.
       package main
       
       import (
-      	"nan0"
+      	"github.com/Yomiji/nan0"
       	"net"
       )
       
@@ -207,7 +207,7 @@ keys need to be used with the server and client.
 package main
 
 import (
-	"nan0"
+	"github.com/Yomiji/nan0"
 	"encoding/base64"
 )
 
@@ -245,7 +245,7 @@ encryption protocol, however, you must use DialNan0Secure method on their client
 package main
 
 import (
-	"nan0"
+	"github.com/Yomiji/nan0"
 	"time"
 	"fmt"
 )
