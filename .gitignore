@@ -96,3 +96,8 @@ fabric.properties
 
 # Editor-based Rest Client
 .idea/httpRequests
+.idea/codeStyles/Project.xml
+.idea/inspectionProfiles/
+.idea/markdown-history.xml
+.idea/codeStyles/codeStyleConfig.xml
+.idea/markdown-navigator.xml
