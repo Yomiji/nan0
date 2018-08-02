@@ -226,12 +226,14 @@ func shareKeys() (encKeyShare, authKeyShare string) {
 // that conversion from strings to the required type.
 //NOTE: Error checking omitted for demonstration purposes only, PLEASE be more vigilant in production systems.
 func keysToNan0Bytes(encKeyShare, authKeyShare string) (encKey, authKey *[32]byte) {
-	encKeyBytes,_ := base64.StdEncoding.DecodeString(encKeyShare)
-	authkeyBytes,_ := base64.StdEncoding.DecodeString(authKeyShare)
-	
+	encKeyBytes, _ := base64.StdEncoding.DecodeString(encKeyShare)
+	authkeyBytes, _ := base64.StdEncoding.DecodeString(authKeyShare)
+
+	encKey = &[32]byte{}
+	authKey = &[32]byte{}
 	copy(encKey[:], encKeyBytes)
 	copy(authKey[:], authkeyBytes)
-	
+
 	return
 } 
 ```
