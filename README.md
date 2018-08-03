@@ -12,7 +12,7 @@ transport protocols, message handshaking and so forth. Here are the primary uses
   readme or simply call the NoLogging function to disable logging from this framework:
   ```go
     package main
-    import "github.com/Yomiji/nan0"
+    import "github.com/yomiji/nan0"
     
     func init() {
         nan0.NoLogging()
@@ -25,7 +25,7 @@ transport protocols, message handshaking and so forth. Here are the primary uses
       package main
       
       import (
-          "github.com/Yomiji/nan0"
+          "github.com/yomiji/nan0"
           "time"
           "io"
           "fmt"
@@ -83,7 +83,7 @@ transport protocols, message handshaking and so forth. Here are the primary uses
     package main
     
     import (
-        "github.com/Yomiji/nan0"
+        "github.com/yomiji/nan0"
         "time"
     )
     
@@ -118,7 +118,7 @@ transport protocols, message handshaking and so forth. Here are the primary uses
     package main
     
     import (
-        "github.com/Yomiji/nan0"
+        "github.com/yomiji/nan0"
         "time"
         "net"
         "io/ioutil"
@@ -168,7 +168,7 @@ the default settings may be more verbose than you need.
     ```go
       package main
       
-      import "github.com/Yomiji/nan0"
+      import "github.com/yomiji/nan0"
       
       func main() {
       	nan0.Debug = nil
@@ -179,7 +179,7 @@ the default settings may be more verbose than you need.
       package main
       
       import (
-      	"github.com/Yomiji/nan0"
+      	"github.com/yomiji/nan0"
       	"net"
       )
       
@@ -207,7 +207,7 @@ keys need to be used with the server and client.
 package main
 
 import (
-	"github.com/Yomiji/nan0"
+	"github.com/yomiji/nan0"
 	"encoding/base64"
 )
 
@@ -245,7 +245,7 @@ encryption protocol, however, you must use DialNan0Secure method on their client
 package main
 
 import (
-	"github.com/Yomiji/nan0"
+	"github.com/yomiji/nan0"
 	"time"
 	"fmt"
 )
@@ -311,7 +311,7 @@ The security framework is based off of [cryptopasta](https://github.com/gtank/cr
 project out for more information on the actual implementation of security methods.
 
 ##### Demo Project
-There is a demo project created using the Nan0 API called [Nan0Chat](https://github.com/Yomiji/nan0chat) . This is a chat application that utilizes the
+There is a demo project created using the Nan0 API called [Nan0Chat](https://github.com/yomiji/nan0chat) . This is a chat application that utilizes the
 features in Nan0 to communicate securely between a server and multiple clients.
 
 ##### Planned Features
