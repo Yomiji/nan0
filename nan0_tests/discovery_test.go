@@ -1,10 +1,11 @@
-package nan0
+package nan0_tests
 
 import (
 	"testing"
 	"fmt"
 	"time"
 	"io"
+	"github.com/yomiji/nan0"
 )
 
 var (
@@ -13,7 +14,7 @@ var (
 
 func TestNanoDiscoveryCreationWithoutCorrectPortShouldFail(t *testing.T) {
 	fmt.Println(">>> Running Nano Discovery Creation with Incorrect Port Test <<<")
-	ds := NewDiscoveryService(0, 0)
+	ds := nan0.NewDiscoveryService(0, 0)
 
 	fmt.Println("\t\tTesting default port check")
 	if !ds.IsShutdown() {
@@ -23,9 +24,9 @@ func TestNanoDiscoveryCreationWithoutCorrectPortShouldFail(t *testing.T) {
 
 func TestNanoDiscoveryRegisterServiceShouldSucceed(t *testing.T) {
 	fmt.Println(">>> Running Nano Discovery Register Servic  Should Succeed Test <<<")
-	ds := NewDiscoveryService(dsDefaultPort, 0)
+	ds := nan0.NewDiscoveryService(dsDefaultPort, 0)
 	defer ds.Shutdown()
-	ns := &Service{
+	ns := &nan0.Service{
 		ServiceType:"Test",
 		StartTime:time.Now().Unix(),
 		ServiceName:"TestService",
@@ -58,9 +59,9 @@ func TestNanoDiscoveryRegisterServiceShouldSucceed(t *testing.T) {
 
 func TestNanoDiscoveryRegisterMultipleServicesShouldSucceed(t *testing.T) {
 	fmt.Println(">>> Running Nano Discovery Multiple Services Should Succeed Test <<<")
-	ds := NewDiscoveryService(dsDefaultPort, 0)
+	ds := nan0.NewDiscoveryService(dsDefaultPort, 0)
 	defer ds.Shutdown()
-	ns1 := &Service{
+	ns1 := &nan0.Service{
 		ServiceType:"Test",
 		StartTime:time.Now().Unix(),
 		ServiceName:"TestService1",
@@ -68,7 +69,7 @@ func TestNanoDiscoveryRegisterMultipleServicesShouldSucceed(t *testing.T) {
 		Port:5555,
 		Expired: false,
 	}
-	ns2 := &Service {
+	ns2 := &nan0.Service {
 		ServiceType:"Test",
 		StartTime:time.Now().Unix(),
 		ServiceName:"TestService2",
@@ -104,10 +105,10 @@ func TestNanoDiscoveryRegisterMultipleServicesShouldSucceed(t *testing.T) {
 
 func TestNanoDiscoveryRegisteredServicesTimeOut(t *testing.T) {
 	fmt.Println(">>> Running Nano Discovery Registered Services Time Out Test <<<")
-	ds := NewDiscoveryService(dsDefaultPort, 3)
+	ds := nan0.NewDiscoveryService(dsDefaultPort, 3)
 	defer ds.Shutdown()
 	// make a service that is inactive, no tcp, should be removed when service refresh time hits
-	ns := &Service{
+	ns := &nan0.Service{
 		ServiceType:"Test",
 		StartTime:time.Now().Unix(),
 		ServiceName:"TestService",
@@ -156,10 +157,10 @@ func TestNanoDiscoveryRegisteredServicesTimeOut(t *testing.T) {
 
 func TestNanoDiscoveryGetServiceBytes(t *testing.T) {
 	fmt.Println(">>> Running Nano Discovery Service Bytes Functions <<<")
-	ds := NewDiscoveryService(dsDefaultPort, 0)
+	ds := nan0.NewDiscoveryService(dsDefaultPort, 0)
 	defer ds.Shutdown()
 	// make a service that is inactive, no tcp, should be removed when service refresh time hits
-	ns := &Service{
+	ns := &nan0.Service{
 		ServiceType:"Test",
 		StartTime:time.Now().Unix(),
 		ServiceName:"TestService",
@@ -218,10 +219,10 @@ func TestNanoDiscoveryGetServiceBytes(t *testing.T) {
 
 func TestNanoDiscoveryServiceCanBeSerializedUsingRead(t *testing.T) {
 	fmt.Println(">>> Running Nano Discovery Service Can Be Serialized Using Read <<<")
-	ds := NewDiscoveryService(dsDefaultPort, 0)
+	ds := nan0.NewDiscoveryService(dsDefaultPort, 0)
 	defer ds.Shutdown()
 	// make a service that is inactive, no tcp, should be removed when service refresh time hits
-	ns1 := &Service{
+	ns1 := &nan0.Service{
 		ServiceType:"Test",
 		StartTime:time.Now().Unix(),
 		ServiceName:"TestService1",
@@ -229,7 +230,7 @@ func TestNanoDiscoveryServiceCanBeSerializedUsingRead(t *testing.T) {
 		Port:5555,
 		Expired: false,
 	}
-	ns2 := &Service{
+	ns2 := &nan0.Service{
 		ServiceType:"Test",
 		StartTime:time.Now().Unix(),
 		ServiceName:"TestService2",
@@ -249,7 +250,7 @@ func TestNanoDiscoveryServiceCanBeSerializedUsingRead(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	nds := NewDiscoveryService(dsDefaultPort+1, 0)
+	nds := nan0.NewDiscoveryService(dsDefaultPort+1, 0)
 	defer nds.Shutdown()
 
 	// copy from one discovery service to another

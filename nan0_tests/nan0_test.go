@@ -1,16 +1,17 @@
-package nan0
+package nan0_tests
 
 import (
 	"testing"
 	"time"
 	"github.com/golang/protobuf/proto"
 	"io"
+	"github.com/yomiji/nan0"
 )
 
 var nsDefaultPort int32 = 2324
 
 func TestNan0_Close(t *testing.T) {
-	ns := &Service{
+	ns := &nan0.Service{
 		ServiceName: "TestService",
 		Port:        nsDefaultPort,
 		HostName:    "localhost",
@@ -23,19 +24,19 @@ func TestNan0_Close(t *testing.T) {
 	}
 	defer listener.Close()
 
-	serviceMsg := proto.Clone(new(Service))
+	serviceMsg := proto.Clone(new(nan0.Service))
 	n, err := ns.DialNan0(false, serviceMsg, 0,0)
-	if n.closed == true {
+	if n.IsClosed() == true {
 		t.Fatal(" \t\tTest Failed, n.closed == true failed")
 	}
 	n.Close()
-	if n.closed != true {
+	if n.IsClosed() != true {
 		t.Fatal(" \t\tTest Failed, n.closed != true after closed")
 	}
 }
 
 func TestNan0_GetReceiver(t *testing.T) {
-	ns := &Service{
+	ns := &nan0.Service{
 		ServiceName: "TestService",
 		Port:        nsDefaultPort,
 		HostName:    "127.0.0.1",
@@ -54,7 +55,7 @@ func TestNan0_GetReceiver(t *testing.T) {
 		}
 
 	}()
-	serviceMsg := proto.Clone(new(Service))
+	serviceMsg := proto.Clone(new(nan0.Service))
 	n, err := ns.DialNan0(true, serviceMsg, 0,0)
 	if err != nil {
 		t.Fatal("\t\tTest Failed, Nan0 failed to connect to service")
@@ -70,7 +71,7 @@ func TestNan0_GetReceiver(t *testing.T) {
 }
 
 func TestService_DialNan0Secure(t *testing.T) {
-	ns := &Service{
+	ns := &nan0.Service{
 		ServiceName: "TestService",
 		Port:        nsDefaultPort,
 		HostName:    "127.0.0.1",
@@ -89,9 +90,9 @@ func TestService_DialNan0Secure(t *testing.T) {
 		}
 
 	}()
-	serviceMsg := proto.Clone(new(Service))
-	encryptionKey := NewEncryptionKey()
-	hmacKey := NewHMACKey()
+	serviceMsg := proto.Clone(new(nan0.Service))
+	encryptionKey := nan0.NewEncryptionKey()
+	hmacKey := nan0.NewHMACKey()
 
 	n, err := ns.DialNan0Secure(encryptionKey, hmacKey).
 		ToggleWriteDeadline(true).

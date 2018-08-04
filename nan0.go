@@ -99,14 +99,14 @@ func (ns Service) Equals(other Service) bool {
 }
 
 // Create a connection to this nanoservice using a traditional TCP connection
-func (ns *Service) DialTCP() (nan0 net.Conn, err error) {
+func (ns Service) DialTCP() (nan0 net.Conn, err error) {
 	nan0, err = net.Dial("tcp", composeTcpAddress(ns.HostName, ns.Port))
 
 	return nan0, err
 }
 
 type SecureNanoBuilder struct {
-	ns                      *Service
+	ns                      Service
 	writeDeadlineActive     bool
 	receiverMessageIdentity proto.Message
 	sendBuffer              int
@@ -116,7 +116,7 @@ type SecureNanoBuilder struct {
 }
 
 // Part of the SecureNanoBuilder chain, used internally
-func (sec *SecureNanoBuilder) setService(ns *Service) *SecureNanoBuilder {
+func (sec *SecureNanoBuilder) setService(ns Service) *SecureNanoBuilder {
 	sec.ns = ns
 	return sec
 }
@@ -154,7 +154,7 @@ func (sec *SecureNanoBuilder) enableEncryption(secretKey *[32]byte, authKey *[32
 	return sec
 }
 
-func (sec *SecureNanoBuilder) BuildNan0() (nan0 *Nan0, err error) {
+func (sec SecureNanoBuilder) BuildNan0() (nan0 *Nan0, err error) {
 	defer recoverPanic(func(e error) {
 		nan0 = &Nan0{
 			ServiceName:    sec.ns.ServiceName,
@@ -185,7 +185,7 @@ func (sec *SecureNanoBuilder) BuildNan0() (nan0 *Nan0, err error) {
 }
 
 // Create a connection to this nanoservice using the Nan0 wrapper around a protocol buffer service layer
-func (ns *Service) DialNan0(writeDeadlineActive bool, receiverMessageIdentity proto.Message, sendBuffer, receiveBuffer int) (nan0 *Nan0, err error) {
+func (ns Service) DialNan0(writeDeadlineActive bool, receiverMessageIdentity proto.Message, sendBuffer, receiveBuffer int) (nan0 *Nan0, err error) {
 	return ns.DialNan0Secure(nil, nil).
 		setService(ns).
 		ToggleWriteDeadline(writeDeadlineActive).
@@ -196,13 +196,13 @@ func (ns *Service) DialNan0(writeDeadlineActive bool, receiverMessageIdentity pr
 }
 
 // Start the process of creating a secure nanoservice using a builder for the parameters
-func (ns *Service) DialNan0Secure(secretKey *[32]byte, authKey *[32]byte) *SecureNanoBuilder {
+func (ns Service) DialNan0Secure(secretKey *[32]byte, authKey *[32]byte) *SecureNanoBuilder {
 	return new(SecureNanoBuilder).enableEncryption(secretKey, authKey).setService(ns)
 }
 
 // Start the active receiver for this Nan0 connection. This enables the 'receiver' channel,
 // constantly reads from the open connection and places the received message on receiver channel
-func (n *Nan0) startServiceReceiver(msg proto.Message, decryptKey *[32]byte, hmacKey *[32]byte) {
+func (n Nan0) startServiceReceiver(msg proto.Message, decryptKey *[32]byte, hmacKey *[32]byte) {
 	if n.conn != nil && !n.closed {
 		for ; ; {
 			n.conn.SetReadDeadline(time.Now().Add(TCPTimeout))
@@ -227,7 +227,7 @@ func (n *Nan0) startServiceReceiver(msg proto.Message, decryptKey *[32]byte, hma
 
 // Start the active sender for this Nan0 connection. This enables the 'sender' channel and allows the user to send
 // protocol buffer messages to the server
-func (n *Nan0) startServiceSender(writeDeadlineIsActive bool, encryptKey *[32]byte, hmacKey *[32]byte) {
+func (n Nan0) startServiceSender(writeDeadlineIsActive bool, encryptKey *[32]byte, hmacKey *[32]byte) {
 	if n.conn != nil && !n.closed {
 		for ; ; {
 			if writeDeadlineIsActive {
@@ -248,7 +248,7 @@ func (n *Nan0) startServiceSender(writeDeadlineIsActive bool, encryptKey *[32]by
 }
 
 // Closes the open connection and terminates the goroutines associated with reading them
-func (n *Nan0) Close() {
+func (n Nan0) Close() {
 	if n.closed {
 		return
 	}
@@ -264,12 +264,16 @@ func (n *Nan0) Close() {
 	<-n.writerShutdown
 }
 
+func (n Nan0) IsClosed() bool {
+	return n.closed
+}
+
 // Return a write-only channel that is used to send a protocol buffer message through this connection
-func (n *Nan0) GetSender() chan<- interface{} {
+func (n Nan0) GetSender() chan<- interface{} {
 	return n.sender
 }
 
 // Returns a read-only channel that is used to receive a protocol buffer message returned through this connection
-func (n *Nan0) GetReceiver() <-chan interface{} {
+func (n Nan0) GetReceiver() <-chan interface{} {
 	return n.receiver
 }
