@@ -115,31 +115,39 @@ type SecureNanoBuilder struct {
 	hmacKey                 *[32]byte
 }
 
+// Part of the SecureNanoBuilder chain, used internally
 func (sec *SecureNanoBuilder) setService(ns *Service) *SecureNanoBuilder {
 	sec.ns = ns
 	return sec
 }
 
+// Part of the SecureNanoBuilder chain, sets write deadline to the TCPTimeout global value
 func (sec *SecureNanoBuilder) ToggleWriteDeadline(writeDeadline bool) *SecureNanoBuilder {
 	sec.writeDeadlineActive = writeDeadline
 	return sec
 }
 
+// Part of the SecureNanoBuilder chain, receiver message identity, does not affect
+// sender messages
 func (sec *SecureNanoBuilder) MessageIdentity(messageIdent proto.Message) *SecureNanoBuilder {
 	sec.receiverMessageIdentity = messageIdent
 	return sec
 }
 
+// Part of the SecureNanoBuilder chain, sets the number of messages that can be simultaneously placed on the send buffer
 func (sec *SecureNanoBuilder) SendBuffer(sendBuffer int) *SecureNanoBuilder {
 	sec.sendBuffer = sendBuffer
 	return sec
 }
 
+// Part of the SecureNanoBuilder chain, sets the number of messages that can be simultaneously placed on the
+// receive buffer
 func (sec *SecureNanoBuilder) ReceiveBuffer(receiveBuffer int) *SecureNanoBuilder {
 	sec.receiveBuffer = receiveBuffer
 	return sec
 }
 
+// Part of the SecureNanoBuilder chain, used internally
 func (sec *SecureNanoBuilder) enableEncryption(secretKey *[32]byte, authKey *[32]byte) *SecureNanoBuilder {
 	sec.encdecKey = secretKey
 	sec.hmacKey = authKey
@@ -179,6 +187,7 @@ func (sec *SecureNanoBuilder) BuildNan0() (nan0 *Nan0, err error) {
 // Create a connection to this nanoservice using the Nan0 wrapper around a protocol buffer service layer
 func (ns *Service) DialNan0(writeDeadlineActive bool, receiverMessageIdentity proto.Message, sendBuffer, receiveBuffer int) (nan0 *Nan0, err error) {
 	return ns.DialNan0Secure(nil, nil).
+		setService(ns).
 		ToggleWriteDeadline(writeDeadlineActive).
 		MessageIdentity(receiverMessageIdentity).
 		SendBuffer(sendBuffer).
@@ -198,9 +207,6 @@ func (n *Nan0) startServiceReceiver(msg proto.Message, decryptKey *[32]byte, hma
 		for ; ; {
 			n.conn.SetReadDeadline(time.Now().Add(TCPTimeout))
 
-			//b := make([]byte, 128)
-			//n.conn.Read(b)
-			//debug("New Message Received\n\t\tBytes: %v\n\t\tSize: %v", b, len(b))
 			newMsg := proto.Clone(msg)
 			err := getMessageFromConnection(n.conn, &newMsg, decryptKey, hmacKey)
 			if err == nil {
