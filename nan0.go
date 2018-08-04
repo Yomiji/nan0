@@ -248,7 +248,7 @@ func (n Nan0) startServiceSender(writeDeadlineIsActive bool, encryptKey *[32]byt
 }
 
 // Closes the open connection and terminates the goroutines associated with reading them
-func (n Nan0) Close() {
+func (n *Nan0) Close() {
 	if n.closed {
 		return
 	}
