@@ -170,6 +170,7 @@ func recoverPanic(errfunc func(error)) func() {
 func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[string]int, encryptKey *[32]byte, hmacKey *[32]byte) (err error) {
 	defer recoverPanic(func(e error) {
 		fail("Message failed to send: %v due to %v", pb, e)
+		err = e
 	})()
 
 	// figure out if the type of the message is in our list
@@ -220,6 +221,7 @@ func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[stri
 func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message, decryptKey *[32]byte, hmacKey *[32]byte) (msg proto.Message, err error) {
 	defer recoverPanic(func(e error) {
 		fail("Failed to receive message due to %v", e)
+		msg = nil
 		err = e
 	})()
 

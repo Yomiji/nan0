@@ -40,14 +40,16 @@ func (n Nan0) startServiceReceiver(identMap map[int] proto.Message, decryptKey *
 	defer recoverPanic(func(e error) {
 		fail("Connection to %v receiver service error occurred: %v", n.GetServiceName(), e)
 		n.Close()
-	})
+	})()
 	if n.conn != nil && !n.closed {
 		for ; ; {
 			err := n.conn.SetReadDeadline(time.Now().Add(TCPTimeout))
 			checkError(err)
 
 			newMsg, err := getMessageFromConnection(n.conn, identMap, decryptKey, hmacKey)
-			checkError(err)
+			if err != nil && newMsg == nil {
+				panic(err)
+			}
 
 			if newMsg != nil {
 				debug("sending %v on receiver", newMsg)
@@ -71,7 +73,7 @@ func (n Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActiv
 	defer recoverPanic(func(e error) {
 		fail("Connection to %v sender service error occurred: %v", n.GetServiceName(), e)
 		n.Close()
-	})
+	})()
 	if n.conn != nil && !n.closed {
 		for ; ; {
 			if writeDeadlineIsActive {
