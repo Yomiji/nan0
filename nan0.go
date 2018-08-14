@@ -37,13 +37,19 @@ type Nan0 struct {
 // Start the active receiver for this Nan0 connection. This enables the 'receiver' channel,
 // constantly reads from the open connection and places the received message on receiver channel
 func (n Nan0) startServiceReceiver(identMap map[int] proto.Message, decryptKey *[32]byte, hmacKey *[32]byte) {
+	defer recoverPanic(func(e error) {
+		fail("Connection to %v receiver service error occurred: %v", n.GetServiceName(), e)
+		n.Close()
+	})
 	if n.conn != nil && !n.closed {
 		for ; ; {
-			n.conn.SetReadDeadline(time.Now().Add(TCPTimeout))
-
+			err := n.conn.SetReadDeadline(time.Now().Add(TCPTimeout))
+			checkError(err)
 
 			newMsg, err := getMessageFromConnection(n.conn, identMap, decryptKey, hmacKey)
-			if newMsg != nil && err == nil {
+			checkError(err)
+
+			if newMsg != nil {
 				debug("sending %v on receiver", newMsg)
 				// Send the message received to the awaiting receive buffer
 				n.receiver <- newMsg
@@ -62,15 +68,23 @@ func (n Nan0) startServiceReceiver(identMap map[int] proto.Message, decryptKey *
 // Start the active sender for this Nan0 connection. This enables the 'sender' channel and allows the user to send
 // protocol buffer messages to the server
 func (n Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActive bool, encryptKey *[32]byte, hmacKey *[32]byte) {
+	defer recoverPanic(func(e error) {
+		fail("Connection to %v sender service error occurred: %v", n.GetServiceName(), e)
+		n.Close()
+	})
 	if n.conn != nil && !n.closed {
 		for ; ; {
 			if writeDeadlineIsActive {
-				n.conn.SetWriteDeadline(time.Now().Add(TCPTimeout))
+				err := n.conn.SetWriteDeadline(time.Now().Add(TCPTimeout))
+				checkError(err)
 			}
 			select {
 			case pb := <- n.sender:
 				debug("Sending message %v", pb)
-				putMessageInConnection(n.conn, pb.(proto.Message), inverseMap, encryptKey, hmacKey)
+				err := putMessageInConnection(n.conn, pb.(proto.Message), inverseMap, encryptKey, hmacKey)
+				if err != nil {
+					fail("Error occurred while sending message: %v", err)
+				}
 			default:
 			}
 			select {
