@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"github.com/golang/protobuf/proto"
 	"net"
-	"time"
-	"os"
+		"os"
 	"log"
 	"errors"
 	"io"
@@ -15,6 +14,8 @@ import (
 	"crypto/rand"
 	"crypto/hmac"
 	"crypto/sha512"
+	"reflect"
+	"time"
 )
 
 /*************
@@ -85,6 +86,14 @@ func SetLogWriter( w io.Writer ) {
 	}
 }
 
+
+/*******************
+	Service Params
+ *******************/
+
+// The max queued connections for Nan0Server handling, used with ListenTCP()
+var MaxNanoCache = 50
+
 // The timeout for TCP Writers and server connections
 var TCPTimeout = 10 * time.Second
 
@@ -97,7 +106,7 @@ var TCPTimeout = 10 * time.Second
 var ProtoPreamble = []byte{0x01, 0x02, 0x03, 0xFF, 0x03, 0x02, 0x01}
 
 // The default array width provided with this API, this is the default value of the SizeArrayWidth
-const defaultArrayWidth = 8
+const defaultArrayWidth = 4
 
 // The number of bytes that constitute the size of the proto.Message sent/received
 // This variable is made visible so that developers can support larger data sizes
@@ -107,7 +116,7 @@ var SizeArrayWidth = defaultArrayWidth
 // NOTE: If you change SizeArrayWidth, you should also change this function
 // This function is made visible so that developers can support larger data sizes
 var SizeReader = func(bytes []byte) int {
-	return int(binary.BigEndian.Uint64(bytes))
+	return int(binary.BigEndian.Uint32(bytes))
 }
 
 // Converts the integer representing the size of the following protobuf message to a byte slice
@@ -115,7 +124,7 @@ var SizeReader = func(bytes []byte) int {
 // This function is made visible so that developers can support variable data sizes
 var SizeWriter = func(size int) (bytes []byte) {
 	bytes = make([]byte, SizeArrayWidth)
-	binary.BigEndian.PutUint64(bytes, uint64(size))
+	binary.BigEndian.PutUint32(bytes, uint32(size))
 	return bytes
 }
 
@@ -155,25 +164,35 @@ func recoverPanic(errfunc func(error)) func() {
 
 // Places the given protocol buffer message in the connection, the connection will receive the following data:
 // 	1. The preamble bytes stored in ProtoPreamble (defaults to 7 bytes)
-//	2. The size of the following protocol buffer message (defaults to 2 bytes)
-// 	3. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
-func putMessageInConnection(conn net.Conn, pb proto.Message, encryptKey *[32]byte, hmacKey *[32]byte) (err error) {
+//  2. The protobuf type identifier (4 bytes)
+//	3. The size of the following protocol buffer message (defaults to 4 bytes)
+// 	4. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
+func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[string]int, encryptKey *[32]byte, hmacKey *[32]byte) (err error) {
 	defer recoverPanic(func(e error) {
 		fail("Message failed to send: %v due to %v", pb, e)
 	})()
 
+	// figure out if the type of the message is in our list
+	typeString := reflect.TypeOf(pb).String()
+	typeVal, ok := inverseMap[typeString]
+	if !ok {
+		checkError(errors.New("type value for message not present"))
+	}
+
+	// if type cannot be found, fail and keep going
 	encrypted := encryptKey != nil && hmacKey != nil
 
 	var bigBytes []byte
 	if encrypted {
-		bigBytes = EncryptProtobuf(pb, encryptKey, hmacKey)
+		bigBytes = EncryptProtobuf(pb, typeVal, encryptKey, hmacKey)
 	} else {
 		// marshal the protobuf message
 		v, err := proto.Marshal(pb)
 		checkError(err)
 		protoSize := len(v)
 		//prepare all items
-		bigBytes = append(ProtoPreamble, SizeWriter(protoSize)...)
+		bigBytes = append(ProtoPreamble, SizeWriter(typeVal)...)
+		bigBytes = append(bigBytes, SizeWriter(protoSize)...)
 		bigBytes = append(bigBytes, v...)
 	}
 
@@ -195,9 +214,10 @@ func putMessageInConnection(conn net.Conn, pb proto.Message, encryptKey *[32]byt
 
 // Retrieves the given protocol buffer message from the connection, the connection is expected to send the following:
 // 	1. The preamble bytes stored in ProtoPreamble (defaults to 7 bytes)
-//	2. The size of the following protocol buffer message (defaults to 2 bytes)
-// 	3. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
-func getMessageFromConnection(conn net.Conn, pb *proto.Message, decryptKey *[32]byte, hmacKey *[32]byte) (err error) {
+//  2. The protobuf type identifier (4 bytes)
+//	3. The size of the following protocol buffer message (defaults to 4 bytes)
+// 	4. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
+func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message, decryptKey *[32]byte, hmacKey *[32]byte) (msg proto.Message, err error) {
 	defer recoverPanic(func(e error) {
 		fail("Failed to receive message due to %v", e)
 		err = e
@@ -208,8 +228,13 @@ func getMessageFromConnection(conn net.Conn, pb *proto.Message, decryptKey *[32]
 
 	// check the preamble
 	err = isPreambleValid(conn)
+	if err == io.EOF {
+		return nil, nil
+	}
 	checkError(err)
-
+	// get the message type bytes
+	messageType:= readSize(conn)
+	msg = proto.Clone(identMap[messageType])
 	// get the size of the hmac if it is encrypted
 	var hmacSize int
 	if encrypted {
@@ -229,13 +254,13 @@ func getMessageFromConnection(conn net.Conn, pb *proto.Message, decryptKey *[32]
 		checkError(errors.New("message size discrepancy while sending"))
 	}
 	if encrypted {
-		err := DecryptProtobuf(v, pb, hmacSize, decryptKey, hmacKey)
+		err := DecryptProtobuf(v, &msg, hmacSize, decryptKey, hmacKey)
 		checkError(err)
 	} else {
-		err = proto.Unmarshal(v, *pb)
+		err = proto.Unmarshal(v, msg)
 		checkError(err)
 	}
-	return err
+	return msg, err
 }
 
 // Decrypts, authenticates and unmarshals a protobuf message using the given encrypt/decrypt key and hmac key
@@ -269,7 +294,7 @@ func DecryptProtobuf(rawData []byte, msg *proto.Message, hmacSize int, decryptKe
 }
 
 // Signs and encrypts a marshalled protobuf message using the given encrypt/decrypt key and hmac key
-func EncryptProtobuf(pb proto.Message, encryptKey *[32]byte, hmacKey *[32]byte) []byte {
+func EncryptProtobuf(pb proto.Message, typeVal int,  encryptKey *[32]byte, hmacKey *[32]byte) []byte {
 	debug("Encrypting %v", pb)
 	defer recoverPanic(func(e error) {
 		fail("decryption issue: %v", e)
@@ -289,7 +314,8 @@ func EncryptProtobuf(pb proto.Message, encryptKey *[32]byte, hmacKey *[32]byte) 
 	checkError(err)
 
 	// build the byte slice that will be the TCP packet sent on the tcp stream
-	result := append(ProtoPreamble, SizeWriter(macSize)...)
+	result := append(ProtoPreamble, SizeWriter(typeVal)...)
+	result = append(result, SizeWriter(macSize)...)
 	result = append(result, SizeWriter(encryptedMsgSize)...)
 	result = append(result, encryptedMsg...)
 	debug("Encrypt complete, result: %v", result)
@@ -305,6 +331,9 @@ func isPreambleValid(reader io.Reader) (err error) {
 	})()
 	b := make([]byte, len(ProtoPreamble))
 	_, err = reader.Read(b)
+	if err == io.EOF {
+		return io.EOF
+	}
 	checkError(err)
 	debug("checking %v against preamble %v", b, ProtoPreamble)
 	for i,v := range b {
@@ -432,4 +461,64 @@ func CheckHMAC(data, suppliedMAC []byte, key *[32]byte) bool {
 	expectedMAC := GenerateHMAC(data, key)
 
 	return hmac.Equal(expectedMAC, suppliedMAC)
+}
+
+// Builds a wrapped server instance that will provide a channel of wrapped connections
+func buildServer(nsb *SecureNanoBuilder, customHandler func(net.Listener, *SecureNanoBuilder, <-chan bool)) (server *Nan0Server, err error) {
+	defer recoverPanic(func(e error) {
+		fail("Error occurred while serving %v: %v", server.service.ServiceName, e)
+		err = e
+		server = nil
+	})()
+	server = &Nan0Server{
+		newConnections:make(chan NanoServiceWrapper, MaxNanoCache),
+		connections: make([]NanoServiceWrapper, MaxNanoCache),
+		listenerShutdown: make(chan bool, 1),
+		confirmShutdown: make(chan bool, 1),
+		closed: false,
+		service: nsb.ns,
+	}
+	// start a listener
+	listener,err := nsb.ns.Start()
+	checkError(err)
+	if customHandler != nil {
+		go customHandler(listener, nsb, server.listenerShutdown)
+		return
+	}
+	// handle shutdown separate from checking for clients
+	go func() {
+		for ; ; {
+			// check to see if we need to shut everything down
+			select {
+			case <-server.listenerShutdown:// close all current connections
+				server.ResetConnections()
+				listener.Close()
+				server.confirmShutdown <- true
+				return
+			default:
+			}
+		}
+	}()
+	go func() {
+		for !server.IsShutdown() {
+			// every time we get a new client
+			conn, err := listener.Accept()
+			if err != nil {
+				fail("Listener for %v no longer accepting connections.", server.service.ServiceName)
+				server.Shutdown()
+			}
+
+			// create a new nan0 connection to the client
+			newNano, err := nsb.WrapConnection(conn)
+			if err != nil {
+				warn("Connection dropped due to %v", err)
+			}
+
+			// place the new connection on the channel and in the connections cache
+			server.AddConnection(newNano)
+		}
+		warn("***** Server %v is shutdown *****", server.GetServiceName())
+	}()
+	info("Server %v started!", server.GetServiceName())
+	return
 }

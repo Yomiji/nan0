@@ -18,98 +18,105 @@ transport protocols, message handshaking and so forth. Here are the primary uses
         nan0.NoLogging()
     }
   ```
-* The **Service** type defines the actual nanoservices that you can create to serve as a client OR server. In order to
-  quickly establish a Service, just instantiate a Service object and call the member function Start on it. You will
-  still need to take the listener returned from this function and create a server:
+* The **Service** type defines the actual nanoservices that you can create to serve as a client OR server. In order to quickly establish a Service, just instantiate a Service object and create a builder for it. You will still need to handle passing data to the connections that are established via the returned object like so:
+  ```go
+          package main
+          
+          import (
+              "github.com/yomiji/nan0"
+              "time"
+              "fmt"
+    		  "github.com/golang/protobuf/proto"
+    	  )
+          
+          //NOTE: Error checking omitted for demonstration purposes only, PLEASE be more vigilant in production systems.
+          func main() {
+              // Create a nan0 service
+              service := &nan0.Service{
+                  ServiceName: "TestService",
+                  Port:        4546,
+                  HostName:    "127.0.0.1",
+                  ServiceType: "Test",
+                  StartTime:   time.Now().Unix(),
+              }
+              
+    		  // Create a service / client builder instance
+    		  builder := service.NewNanoBuilder().
+    			  AddMessageIdentity(proto.Clone(service)).
+    		  	ReceiveBuffer(0).
+    		  	SendBuffer(0)
+    		  // Build an echo server, nil for default implementation
+    		  server, _ := builder.BuildServer(nil)
+    		  defer server.Shutdown()
+    		  // The function for echo service, for the first connection, pass all messages received to the sender
+    		  go func() {
+    			  conn := <-server.GetConnections()
+    			  for ; ; {
+    				  select {
+    				  case msg := <-conn.GetReceiver():
+    					  conn.GetSender() <- msg
+    				  default:
+    				  }
+    			  }
+    		  }()
+    		  
+              // Establish a client connection
+              comm,_ := service.DialNan0().
+      			AddMessageIdentity(service).
+      			ToggleWriteDeadline(false).
+      		Build()
+              
+              // Shutdown when finished
+              defer comm.Close()
+              
+              // The nan0.Nan0 allows for sending and receiving protobufs on channels for communication
+              sender := comm.GetSender()
+              receiver := comm.GetReceiver()
+              
+              // Send a protocol buffer, yes nan0.Service is a protobuf type
+              sender <- service
+              // Wait to receive a response, which should be the Service back again in this case due to the echo code above
+              result := <-receiver
+              
+              // Test the results, should be the same
+              if service.String() == result.(nan0.Service).String() {
+                  fmt.Println("Service was echoed back")
+              }
+          }
+  ```
+* You can create a secure service with authentication and encryption by creating ***Secret*** and ***Auth*** keys and
+  calling the **DialNan0Secure** method. There are also DecryptProtobuf and EncryptProtobuf for use in server code.
   ```go
       package main
       
       import (
           "github.com/yomiji/nan0"
           "time"
-          "io"
-          "fmt"
       )
       
-      //NOTE: Error checking omitted for demonstration purposes only, PLEASE be more vigilant in production systems.
+      // establish secrets and pass them to your server and client
+      var secretKey = nan0.NewEncryptionKey()
+      var authKey = nan0.NewHMACKey()
+      
       func main() {
-          // Create a nan0 service
-          service := &nan0.Service{
+      	
+      	// create a new service to connect to
+          ns := &nan0.Service{
               ServiceName: "TestService",
-              Port:        4546,
+              Port:        3234,
               HostName:    "127.0.0.1",
               ServiceType: "Test",
               StartTime:   time.Now().Unix(),
           }
           
-          // Start a server
-          listener, _ := service.Start()
-          
-          // Shutdown when finished
-          defer listener.Close()
-          
-          // Create an echo service, every protocol buffer sent to this service will be echoed back
-          go func() {
-              conn, _ := listener.Accept()
-              for ; ; {
-                  io.Copy(conn, conn)
-              }
-          }()
-          
-          // Establish a client connection
-          comm,_ := service.DialNan0(false, service, 0, 0)
-          
-          // Shutdown when finished
-          defer comm.Close()
-          
-          // The nan0.Nan0 allows for sending and receiving protobufs on channels for communication
-          sender := comm.GetSender()
-          receiver := comm.GetReceiver()
-          
-          // Send a protocol buffer, yes nan0.Service is a protobuf type
-          sender <- service
-          // Wait to receive a response, which should be the Service back again in this case due to the echo code above
-          result := <-receiver
-          
-          // Test the results, should be the same
-          if service.String() == result.(nan0.Service).String() {
-              fmt.Println("Service was echoed back")
-          }
+          // use the resulting nanoservice connection
+          ns.DialNan0Secure(secretKey, authKey).
+              ToggleWriteDeadline(true).
+              AddMessageIdentity(ns).
+              SendBuffer(0).
+              ReceiveBuffer(0).
+          Build()
       }
-  ```
-* You can create a secure service with authentication and encryption by creating ***Secret*** and ***Auth*** keys and
-  calling the **DialNan0Secure** method. There are also DecryptProtobuf and EncryptProtobuf for use in server code.
-  ```go
-    package main
-    
-    import (
-        "github.com/yomiji/nan0"
-        "time"
-    )
-    
-    // establish secrets and pass them to your server and client
-    var secretKey = nan0.NewEncryptionKey()
-    var authKey = nan0.NewHMACKey()
-    
-    func main() {
-    	
-    	// create a new service to connect to
-        ns := &nan0.Service{
-            ServiceName: "TestService",
-            Port:        3234,
-            HostName:    "127.0.0.1",
-            ServiceType: "Test",
-            StartTime:   time.Now().Unix(),
-        }
-        
-        // use the resulting nanoservice connection
-        ns.DialNan0Secure(secretKey, authKey).
-            ToggleWriteDeadline(true).
-            MessageIdentity(ns).
-            SendBuffer(0).
-            ReceiveBuffer(0).
-        BuildNan0()
-    }
   ```
 
 * The **DiscoveryService** type defines a server that registers several nanoservices under a specified type and by name.
@@ -194,9 +201,10 @@ Security in Nan0 takes place at the connection level. The underlying network pac
 (constructed in the step order):
 
 1. Message header preamble (by default 7 bytes)
-2. HMAC size header (8 bytes max)
-3. Size header (8 bytes max)
-4. Encrypted bytes (length of "Size header" bytes)
+2. Data Type identifier (8 bytes max)
+3. HMAC size header (8 bytes max)
+4. Size header (8 bytes max)
+5. Encrypted bytes (length of "Size header" bytes)
 
 Inside the encrypted bytes, a marshalled protobuf is signed using the HMAC key to provide a layer of authentication.
 
@@ -238,9 +246,9 @@ func keysToNan0Bytes(encKeyShare, authKeyShare string) (encKey, authKey *[32]byt
 } 
 ```
 
-The server will use the EncryptProtobuf and DecryptProtobuf functions to construct messages passed to the client. The
+The server will utilize the supplied encryption key and signature to initialize the wrapper. The
 encryption is mostly abstracted from clients, messages can be retrieved or sent on the streams without regard to the
-encryption protocol, however, you must use DialNan0Secure method on their client instead of DialNan0.
+encryption being enabled, however, you must use DialNan0Secure method on their client instead of DialNan0.
 ```go
 package main
 
@@ -248,6 +256,7 @@ import (
 	"github.com/yomiji/nan0"
 	"time"
 	"fmt"
+	"github.com/golang/protobuf/proto"
 )
 
 func main() {
@@ -260,32 +269,35 @@ func main() {
 		StartTime:   time.Now().Unix(),
 	}
 
-	// Start a server
-	listener, _ := service.Start()
-
-	// Shutdown when finished
-	defer listener.Close()
-
 	// Trivially create encryption and signing keys
-	encKey := nan0.NewEncryptionKey()
-	authKey := nan0.NewHMACKey()
-	
-	// Create an echo service, every protocol buffer sent to this service will be echoed back
+	encryptionKey := nan0.NewEncryptionKey()
+	signature := nan0.NewHMACKey()
+
+	// Create a service / client builder instance
+	builder := service.NewNanoBuilder().
+		AddMessageIdentity(proto.Clone(new(nan0.Service))).
+		SendBuffer(0).
+		ReceiveBuffer(0).
+		ToggleWriteDeadline(true).
+		EnableEncryption(encryptionKey, signature)
+
+	// Build an echo server, nil for default implementation
+	server, _ := builder.BuildServer(nil)
+	defer server.Shutdown()
+	// The function for echo service, for the first connection, pass all messages received ot the sender
 	go func() {
-		conn, _ := listener.Accept()
+		conn := <-server.GetConnections()
 		for ; ; {
-			// whenever we receive something, send the service, encrypted
-			conn.Write(nan0.EncryptProtobuf(service, encKey, authKey))
+			select {
+			case msg := <-conn.GetReceiver():
+				conn.GetSender() <- msg
+			default:
+			}
 		}
 	}()
 
 	// Establish a secure client connection
-	comm,_ := service.DialNan0Secure(encKey, authKey).
-		ToggleWriteDeadline(true).
-		MessageIdentity(service).
-		SendBuffer(0).
-		ReceiveBuffer(0).
-	BuildNan0()
+	comm,_ := builder.Build()
 
 	// Shutdown when finished
 	defer comm.Close()
@@ -296,12 +308,12 @@ func main() {
 
 	// Send a protocol buffer, yes nan0.Service is a protobuf type
 	sender <- service
-	
+
 	// Wait to receive a response, which should be the service as sent above (we ignored the sender silently)
 	result := <-receiver
 
 	// Test the results, should be the same
-	if service.String() == result.(nan0.Service).String() {
+	if service.String() == result.(*nan0.Service).String() {
 		fmt.Println("Service was echoed back")
 	}
 }
