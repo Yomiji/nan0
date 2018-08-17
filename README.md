@@ -201,9 +201,9 @@ Security in Nan0 takes place at the connection level. The underlying network pac
 (constructed in the step order):
 
 1. Message header preamble (by default 7 bytes)
-2. Data Type identifier (8 bytes max)
-3. HMAC size header (8 bytes max)
-4. Size header (8 bytes max)
+2. Data Type identifier (4 bytes max)
+3. HMAC size header (4 bytes max)
+4. Size header (4 bytes max)
 5. Encrypted bytes (length of "Size header" bytes)
 
 Inside the encrypted bytes, a marshalled protobuf is signed using the HMAC key to provide a layer of authentication.
