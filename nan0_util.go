@@ -16,6 +16,7 @@ import (
 	"crypto/sha512"
 	"reflect"
 	"time"
+	"encoding/base64"
 )
 
 /*************
@@ -464,6 +465,32 @@ func CheckHMAC(data, suppliedMAC []byte, key *[32]byte) bool {
 
 	return hmac.Equal(expectedMAC, suppliedMAC)
 }
+
+// A simple function to make the keys generated a sharable string
+func ShareKeys() (encKeyShare, authKeyShare string) {
+	encKeyBytes := NewEncryptionKey()
+	authKeyBytes := NewHMACKey()
+
+	encKeyShare = base64.StdEncoding.EncodeToString(encKeyBytes[:])
+	authKeyShare = base64.StdEncoding.EncodeToString(authKeyBytes[:])
+
+	return
+}
+
+// The nan0 functions require a specific key type and width, this is a way to make
+// that conversion from strings to the required type.
+func KeysToNan0Bytes(encKeyShare, authKeyShare string) (encKey, authKey *[32]byte) {
+	encKeyBytes, _ := base64.StdEncoding.DecodeString(encKeyShare)
+	authkeyBytes, _ := base64.StdEncoding.DecodeString(authKeyShare)
+
+	encKey = &[32]byte{}
+	authKey = &[32]byte{}
+	copy(encKey[:], encKeyBytes)
+	copy(authKey[:], authkeyBytes)
+
+	return
+}
+
 
 // Builds a wrapped server instance that will provide a channel of wrapped connections
 func buildServer(nsb *SecureNanoBuilder, customHandler func(net.Listener, *SecureNanoBuilder, <-chan bool)) (server *Nan0Server, err error) {

@@ -3,7 +3,10 @@
 ##### Purpose
 This framework is designed to make it easier to pass messages between nanoservices, which are just a fancy name for
 lightweight microservices that compose some of my work. This framework supports developers in creating stream-based communications for protocol buffers over raw tcp connections.
-
+The key features of this framework include:
+1.  Quickly establish server and client communication objects using distinct builder pattern
+2.  Pass protobuf-based objects directly into a channel to both clients and servers
+3.  Silently encrypt all objects passed between server and client
 ##### Usage
 When I put together the framework, I needed a way to build the services without having to worry about the network
 transport protocols, message handshaking and so forth. Here are the primary uses and caveats:
@@ -21,67 +24,64 @@ transport protocols, message handshaking and so forth. Here are the primary uses
 * The **Service** type defines the actual nanoservices that you can create to serve as a client OR server. In order to quickly establish a Service, just instantiate a Service object and create a builder for it. You will still need to handle passing data to the connections that are established via the returned object like so:
   ```go
     package main
-    
+      
     import (
-        "github.com/yomiji/nan0"
-        "time"
-        "fmt"
-        "github.com/golang/protobuf/proto"
-    )
-    
-    //NOTE: Error checking omitted for demonstration purposes only, PLEASE be more vigilant in production systems.
+          "github.com/yomiji/nan0"
+          "time"
+          "fmt"
+          "github.com/golang/protobuf/proto"
+      )
+      
+      //NOTE: Error checking omitted for demonstration purposes only, PLEASE be more vigilant in production systems.
     func main() {
-        // Create a nan0 service
-        service := &nan0.Service{
-            ServiceName: "TestService",
-            Port:        4546,
-            HostName:    "127.0.0.1",
-            ServiceType: "Test",
-            StartTime:   time.Now().Unix(),
-        }
+    	// Create a nan0 service
+    	service := &nan0.Service{
+    		ServiceName: "TestService",
+    		Port:        4546,
+    		HostName:    "127.0.0.1",
+    		ServiceType: "Test",
+    		StartTime:   time.Now().Unix(),
+    	}
     
-        // Create a service / client builder instance
-        builder := service.NewNanoBuilder().
-            AddMessageIdentity(proto.Clone(service)).
-            ReceiveBuffer(0).
-            SendBuffer(0)
-        // Build an echo server, nil for default implementation
-        server, _ := builder.BuildServer(nil)
-        defer server.Shutdown()
-        // The function for echo service, for the first connection, pass all messages received to the sender
-        go func() {
-            conn := <-server.GetConnections()
-            for ; ; {
-                select {
-                case msg := <-conn.GetReceiver():
-                    conn.GetSender() <- msg
-                default:
-                }
-            }
-        }()
+    	// Create a service / client builder instance
+    	builder := service.NewNanoBuilder().
+    		AddMessageIdentity(proto.Clone(service)).
+    		ReceiveBuffer(0).
+    		SendBuffer(0)
+    	// Build an echo server, nil for default implementation
+    	server, _ := builder.BuildServer(nil)
+    	defer server.Shutdown()
+    	// The function for echo service, for the first connection, pass all messages received to the sender
+    	go func() {
+    		conn := <-server.GetConnections()
+    		for ; ; {
+    			select {
+    			case msg := <-conn.GetReceiver():
+    				conn.GetSender() <- msg
+    			default:
+    			}
+    		}
+    	}()
     
-        // Establish a client connection
-        comm, _ := service.DialNan0().
-            AddMessageIdentity(service).
-            ToggleWriteDeadline(false).
-            Build()
+    	// Establish a client connection
+    	comm, _ := builder.Build()
     
-        // Shutdown when finished
-        defer comm.Close()
+    	// Shutdown when finished
+    	defer comm.Close()
     
-        // The nan0.Nan0 allows for sending and receiving protobufs on channels for communication
-        sender := comm.GetSender()
-        receiver := comm.GetReceiver()
+    	// The nan0.Nan0 allows for sending and receiving protobufs on channels for communication
+    	sender := comm.GetSender()
+    	receiver := comm.GetReceiver()
     
-        // Send a protocol buffer, yes nan0.Service is a protobuf type
-        sender <- service
-        // Wait to receive a response, which should be the Service back again in this case due to the echo code above
-        result := <-receiver
+    	// Send a protocol buffer, yes nan0.Service is a protobuf type
+    	sender <- service
+    	// Wait to receive a response, which should be the Service back again in this case due to the echo code above
+    	result := <-receiver
     
-        // Test the results, should be the same
-        if service.String() == result.(nan0.Service).String() {
-            fmt.Println("Service was echoed back")
-        }
+    	// Test the results, should be the same
+    	if service.String() == result.(*nan0.Service).String() {
+    		fmt.Println("Service was echoed back")
+    	}
     }
   ```
 * You can create a secure service with authentication and encryption by creating ***Secret*** and ***Auth*** keys and
@@ -118,51 +118,6 @@ transport protocols, message handshaking and so forth. Here are the primary uses
           Build()
       }
   ```
-
-* The **DiscoveryService** type defines a server that registers several nanoservices under a specified type and by name.
-  Connect to the DiscoveryService using a Dial to obtain the list of Services registered.
-  ```go
-      package main
-      
-      import (
-          "github.com/yomiji/nan0"
-          "time"
-          "net"
-          "io/ioutil"
-          "github.com/golang/protobuf/proto"
-      )
-      
-      func main() {
-          // Create a DiscoveryService object
-          discoveryService := nan0.NewDiscoveryService(4677, 10)
-          
-          // Remember to shutdown
-          defer discoveryService.Shutdown()
-      
-          // Create a nanoservice
-          ns := &nan0.Service{
-              ServiceType:"Test",
-              StartTime:time.Now().Unix(),
-              ServiceName:"TestService",
-              HostName:"::1",
-              Port:5555,
-              Expired: false,
-          }
-      
-          // Register the service with the discovery service
-          ns.Register("::1", 4677)
-          
-          // Connect to discoveryService and read to fill ServiceList structure to get all services
-          conn, _ := net.Dial("tcp", "[::1]:4677")
-          b,_ := ioutil.ReadAll(conn)
-          services := &nan0.ServiceList{}
-          proto.Unmarshal(b, services)
-          
-          // Do something with available services
-          _ = services.ServicesAvailable
-      }
-    ```
-* The DiscoveryService returns a **ServiceList** object
 
 ##### Logging
 This framework has a logging package that is used to inform the consumer of the details of operation. The logging
@@ -208,41 +163,38 @@ Security in Nan0 takes place at the connection level. The underlying network pac
 
 Inside the encrypted bytes, a marshalled protobuf is signed using the HMAC key to provide a layer of authentication.
 
-To utilize the encryption features, you must first create a private encryption key and an hmac authentication key, these
-keys need to be used with the server and client.
+To utilize the encryption features, you must first create a private encryption key and an hmac authentication key, these keys need to be used with the server and client. Use the ShareKeys and KeysToNan0Bytes utility functions to accomplish this task.
 
 ```go
 package main
 
 import (
 	"github.com/yomiji/nan0"
-	"encoding/base64"
+	"time"
 )
 
-// A simple function to make the keys generated a sharable string
-func shareKeys() (encKeyShare, authKeyShare string) {
-  encKeyBytes := nan0.NewEncryptionKey()
-  authKeyBytes := nan0.NewHMACKey()
-
-  encKeyShare = base64.StdEncoding.EncodeToString(encKeyBytes[:])
-  authKeyShare = base64.StdEncoding.EncodeToString(authKeyBytes[:])
-
-  return
-}
-
-// The nan0 functions require a specific key type and width, this is a way to make 
-// that conversion from strings to the required type.
-//NOTE: Error checking omitted for demonstration purposes only, PLEASE be more vigilant in production systems.
-func keysToNan0Bytes(encKeyShare, authKeyShare string) (encKey, authKey *[32]byte) {
-  encKeyBytes, _ := base64.StdEncoding.DecodeString(encKeyShare)
-  authkeyBytes, _ := base64.StdEncoding.DecodeString(authKeyShare)
-  
-  encKey = &[32]byte{}
-  authKey = &[32]byte{}
-  copy(encKey[:], encKeyBytes)
-  copy(authKey[:], authkeyBytes)
-  
-  return
+func main() {
+	ns := &nan0.Service{
+		ServiceName:"TestNan0Keys",
+		HostName:"127.0.0.1",
+		Port:2212,
+		StartTime:time.Now().Unix(),
+		ServiceType:"Test",
+		Expired:false,
+	}
+	
+	// create and share a key couplet:
+	encKeyString, sigString := nan0.ShareKeys()
+	
+	//take the keys and add them to the new client/server
+	builder := ns.NewNanoBuilder().
+		EnableEncryption(nan0.KeysToNan0Bytes(encKeyString, sigString))
+	
+	// make an encrypted server
+	builder.BuildServer(nil)
+	
+	// make an encrypted client
+	builder.Build()
 }
 ```
 
