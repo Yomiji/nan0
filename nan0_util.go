@@ -186,7 +186,7 @@ func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[stri
 
 	var bigBytes []byte
 	if encrypted {
-		bigBytes = EncryptProtobuf(pb, typeVal, encryptKey, hmacKey)
+		bigBytes = encryptProtobuf(pb, typeVal, encryptKey, hmacKey)
 	} else {
 		// marshal the protobuf message
 		v, err := proto.Marshal(pb)
@@ -257,7 +257,7 @@ func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message, dec
 		checkError(errors.New("message size discrepancy while sending"))
 	}
 	if encrypted {
-		err := DecryptProtobuf(v, &msg, hmacSize, decryptKey, hmacKey)
+		err := decryptProtobuf(v, &msg, hmacSize, decryptKey, hmacKey)
 		checkError(err)
 	} else {
 		err = proto.Unmarshal(v, msg)
@@ -267,7 +267,7 @@ func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message, dec
 }
 
 // Decrypts, authenticates and unmarshals a protobuf message using the given encrypt/decrypt key and hmac key
-func DecryptProtobuf(rawData []byte, msg *proto.Message, hmacSize int, decryptKey *[32]byte, hmacKey *[32]byte) (err error) {
+func decryptProtobuf(rawData []byte, msg *proto.Message, hmacSize int, decryptKey *[32]byte, hmacKey *[32]byte) (err error) {
 	debug("Decrypting a byte slice of size %v", len(rawData))
 	defer recoverPanic(func(e error) {
 		fail("decryption issue: %v", e)
@@ -275,7 +275,7 @@ func DecryptProtobuf(rawData []byte, msg *proto.Message, hmacSize int, decryptKe
 	})()
 
 	// decrypt message
-	decryptedBytes, err := Decrypt(rawData, decryptKey)
+	decryptedBytes, err := decrypt(rawData, decryptKey)
 	checkError(err)
 
 	// split the hmac signature from the real data based hmacSize
@@ -297,7 +297,7 @@ func DecryptProtobuf(rawData []byte, msg *proto.Message, hmacSize int, decryptKe
 }
 
 // Signs and encrypts a marshalled protobuf message using the given encrypt/decrypt key and hmac key
-func EncryptProtobuf(pb proto.Message, typeVal int,  encryptKey *[32]byte, hmacKey *[32]byte) []byte {
+func encryptProtobuf(pb proto.Message, typeVal int,  encryptKey *[32]byte, hmacKey *[32]byte) []byte {
 	debug("Encrypting %v", pb)
 	defer recoverPanic(func(e error) {
 		fail("decryption issue: %v", e)
@@ -312,7 +312,7 @@ func EncryptProtobuf(pb proto.Message, typeVal int,  encryptKey *[32]byte, hmacK
 	data := append(mac, rawData...)
 
 	// encrypt the data
-	encryptedMsg, err := Encrypt(data, encryptKey)
+	encryptedMsg, err := encrypt(data, encryptKey)
 	encryptedMsgSize := len(encryptedMsg)
 	checkError(err)
 
@@ -378,7 +378,7 @@ func NewEncryptionKey() *[32]byte {
 // Encrypt encrypts data using 256-bit AES-GCM.  This both hides the content of
 // the data and provides a check that it hasn't been altered. Output takes the
 // form nonce|ciphertext|tag where '|' indicates concatenation.
-func Encrypt(plaintext []byte, key *[32]byte) (ciphertext []byte, err error) {
+func encrypt(plaintext []byte, key *[32]byte) (ciphertext []byte, err error) {
 	block, err := aes.NewCipher(key[:])
 	if err != nil {
 		return nil, err
@@ -403,7 +403,7 @@ func Encrypt(plaintext []byte, key *[32]byte) (ciphertext []byte, err error) {
 // Decrypt decrypts data using 256-bit AES-GCM.  This both hides the content of
 // the data and provides a check that it hasn't been altered. Expects input
 // form nonce|ciphertext|tag where '|' indicates concatenation.
-func Decrypt(ciphertext []byte, key *[32]byte) (plaintext []byte, err error) {
+func decrypt(ciphertext []byte, key *[32]byte) (plaintext []byte, err error) {
 	block, err := aes.NewCipher(key[:])
 	if err != nil {
 		return nil, err
