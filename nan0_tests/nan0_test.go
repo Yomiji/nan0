@@ -89,7 +89,7 @@ func TestNan0_FailWithWrongType(t *testing.T) {
 		StartTime:   time.Now().Unix(),
 	}
 
-	builder := ns.DialNan0().
+	builder := ns.NewNanoBuilder().
 		AddMessageIdentity(proto.Clone(new(any.Any))).
 		ToggleWriteDeadline(true)
 	server,err := builder.BuildServer(nil)

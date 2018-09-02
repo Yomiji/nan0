@@ -32,6 +32,8 @@ type Nan0 struct {
 	readerShutdown chan bool
 	// Channel governing the writer service
 	writerShutdown chan bool
+	// Channel governing the shutdown completion
+	closeComplete chan bool
 }
 
 // Start the active receiver for this Nan0 connection. This enables the 'receiver' channel,
@@ -41,6 +43,10 @@ func (n Nan0) startServiceReceiver(identMap map[int] proto.Message, decryptKey *
 		fail("Connection to %v receiver service error occurred: %v", n.GetServiceName(), e)
 		n.Close()
 	})()
+	defer func() {
+		n.closeComplete <- true
+		debug("Shutting down service receiver for %v", n.ServiceName)
+	}()
 	if n.conn != nil && !n.closed {
 		for ; ; {
 			err := n.conn.SetReadDeadline(time.Now().Add(TCPTimeout))
@@ -58,8 +64,6 @@ func (n Nan0) startServiceReceiver(identMap map[int] proto.Message, decryptKey *
 			}
 			select {
 			case <-n.readerShutdown:
-				n.writerShutdown <- true
-				debug("Shutting down service receiver for %v", n.ServiceName)
 				return
 			default:
 			}
@@ -74,6 +78,10 @@ func (n Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActiv
 		fail("Connection to %v sender service error occurred: %v", n.GetServiceName(), e)
 		n.Close()
 	})()
+	defer func() {
+		n.closeComplete <- true
+		debug("Shutting down service sender for %v", n.ServiceName)
+	}()
 	if n.conn != nil && !n.closed {
 		for ; ; {
 			if writeDeadlineIsActive {
@@ -91,8 +99,6 @@ func (n Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActiv
 			}
 			select {
 			case <-n.writerShutdown:
-				n.readerShutdown <- true
-				debug("Shutting down service sender for %v", n.ServiceName)
 				return
 			default:
 			}
@@ -113,8 +119,8 @@ func (n *Nan0) Close() {
 	n.conn.Close()
 	debug("Dialed connection for server %v closed after shutdown signal received", n.ServiceName)
 	// wait until both goroutines are closed
-	<-n.readerShutdown
-	<-n.writerShutdown
+	<-n.closeComplete
+	<-n.closeComplete
 	warn("Connection to %v is shut down!", n.ServiceName)
 }
 

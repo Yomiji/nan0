@@ -24,6 +24,5 @@ type NanoServiceWrapper interface {
 type Server interface {
 	IsAlive() bool
 	IsExpired() bool
-	Register(host string, port int32) error
 	Shutdown()
 }

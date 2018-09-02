@@ -54,11 +54,6 @@ func (server Nan0Server) IsAlive() bool {
 	return server.service.IsAlive()
 }
 
-// Exposes the Register method of the service delegate
-func (server Nan0Server) Register(host string, port int32) error {
-	return server.service.Register(host, port)
-}
-
 // Get the channel which is fed new connections to the server
 func (server *Nan0Server) GetConnections() <-chan NanoServiceWrapper {
 	return server.newConnections

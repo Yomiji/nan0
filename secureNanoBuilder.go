@@ -83,6 +83,7 @@ func (sec SecureNanoBuilder) Build() (nan0 NanoServiceWrapper, err error) {
 			closed:         true,
 			writerShutdown: nil,
 			readerShutdown: nil,
+			closeComplete:  nil,
 		}
 		err = e.(error)
 	})()
@@ -109,6 +110,7 @@ func (sec SecureNanoBuilder) WrapConnection(conn net.Conn) (nan0 NanoServiceWrap
 			closed:         true,
 			writerShutdown: nil,
 			readerShutdown: nil,
+			closeComplete:  nil,
 		}
 		err = e.(error)
 	})()
@@ -121,6 +123,7 @@ func (sec SecureNanoBuilder) WrapConnection(conn net.Conn) (nan0 NanoServiceWrap
 		closed:         false,
 		writerShutdown: make(chan bool,1),
 		readerShutdown: make(chan bool,1),
+		closeComplete:  make(chan bool, 2),
 	}
 
 	go nan0.startServiceReceiver(sec.messageIdentMap, sec.encdecKey, sec.hmacKey)

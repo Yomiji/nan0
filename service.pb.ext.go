@@ -3,7 +3,6 @@ package nan0
 import (
 	"net"
 	"time"
-	"github.com/golang/protobuf/proto"
 )
 
 /*******************
@@ -35,24 +34,6 @@ func (ns Service) IsAlive() bool {
 // Refreshes the start time so that this service does not expire
 func (ns *Service) Refresh() {
 	ns.StartTime = time.Now().Unix()
-}
-
-// Registers this nanoservice with the service discovery host at the given address
-func (ns *Service) Register(host string, port int32) (err error) {
-	address := composeTcpAddress(host, port)
-	info("Registering '%v' service with discovery at '%v'", ns.ServiceName, address)
-	defer recoverPanic(func(e error) { err = e.(error) })()
-	conn, err := net.Dial("tcp", address)
-	checkError(err)
-	serviceList := &ServiceList{
-		ServiceType:       ns.ServiceType,
-		ServicesAvailable: []*Service{ns},
-	}
-	serviceListBytes, err := proto.Marshal(serviceList)
-	checkError(err)
-	_, err = conn.Write(serviceListBytes)
-	checkError(err)
-	return err
 }
 
 // Compare two service instances for equality

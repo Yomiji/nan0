@@ -10,8 +10,3 @@ message Service {
     string serviceName = 5;
     string serviceType = 6;
 }
-
-message ServiceList {
-    string serviceType = 1;
-    repeated Service servicesAvailable = 2;
-}
