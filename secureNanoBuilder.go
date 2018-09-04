@@ -45,9 +45,9 @@ func (sec *SecureNanoBuilder) AddMessageIdentities(messageIdents ...proto.Messag
 // All protocol buffers you intend to send or receive should be registered with this method
 // or the transmissions will fail
 func (sec *SecureNanoBuilder) AddMessageIdentity(messageIdent proto.Message) *SecureNanoBuilder {
-	i := len(sec.messageIdentMap)
-	sec.messageIdentMap[i] = messageIdent
 	t := reflect.TypeOf(messageIdent).String()
+	i := int(hashString(t))
+	sec.messageIdentMap[i] = messageIdent
 	sec.inverseIdentMap[t] = i
 	return sec
 }

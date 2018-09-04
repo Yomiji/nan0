@@ -17,6 +17,7 @@ import (
 	"reflect"
 	"time"
 	"encoding/base64"
+	"hash/fnv"
 )
 
 /*************
@@ -132,6 +133,13 @@ var SizeWriter = func(size int) (bytes []byte) {
 /*************************
 	Helper Functions
 *************************/
+
+// From 
+func hashString(s string) uint32 {
+		h := fnv.New32a()
+	h.Write([]byte(s))
+	return h.Sum32()
+}
 
 //	Checks the error passed and panics if issue found
 func checkError(err error) {

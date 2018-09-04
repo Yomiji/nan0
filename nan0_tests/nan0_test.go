@@ -223,3 +223,55 @@ func Test_BuildServer(t *testing.T) {
 		t.Fatal("Failed, did not receive message within allotted time")
 	}
 }
+
+func TestNan0_MixedOrderMessageIdent(t *testing.T) {
+	ns := &nan0.Service{
+		ServiceName: "TestService",
+		Port:        nsDefaultPort,
+		HostName:    "127.0.0.1",
+		ServiceType: "Test",
+		StartTime:   time.Now().Unix(),
+	}
+
+	builder1 := ns.NewNanoBuilder().
+		AddMessageIdentities(proto.Clone(new(nan0.Service)), proto.Clone(new(any.Any))).
+		ToggleWriteDeadline(true)
+	server,err := builder1.BuildServer(nil)
+	defer server.Shutdown()
+	if err != nil {
+		t.Fatal("\t\tTest Failed BuildServer failed")
+	}
+	go func() {
+		conn := <-server.GetConnections()
+		defer conn.Close()
+		for ; ; {
+			select {
+			case msg := <-conn.GetReceiver():
+				conn.GetSender() <- msg
+			default:
+			}
+		}
+	}()
+
+	builder2 := ns.NewNanoBuilder().
+		AddMessageIdentities(proto.Clone(new(any.Any)), proto.Clone(new(nan0.Service))).
+		ToggleWriteDeadline(true)
+	n, err := builder2.Build()
+	defer n.Close()
+
+	if err != nil {
+		t.Fatal("\t\tTest Failed, Nan0 failed to connect to service")
+	}
+	sender := n.GetSender()
+	sender <- ns
+	receiver := n.GetReceiver()
+
+	select {
+	case val := <-receiver:
+		if _, ok := val.(any.Any); ok {
+			t.Fatal("\t\tTest Failed, Nan0 should not be Any")
+	}
+	case <-time.After(2 * time.Second):
+		t.Fatal("\t\tTest Failed, Timeout")
+	}
+}
