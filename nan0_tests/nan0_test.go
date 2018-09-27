@@ -5,14 +5,12 @@ import (
 	"time"
 	"github.com/golang/protobuf/proto"
 	"io"
-	"github.com/yomiji/nan0"
+	"github.com/Yomiji/nan0"
 	"github.com/golang/protobuf/ptypes/any"
 	"fmt"
 )
 
 var nsDefaultPort int32 = 2324
-
-//TODO: Fix all DialNan0 tests due to recent API consolidation
 
 func TestNan0_Close(t *testing.T) {
 	ns := &nan0.Service{
