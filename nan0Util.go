@@ -110,9 +110,6 @@ var ProtoPreamble = []byte{0x01, 0x02, 0x03, 0xFF, 0x03, 0x02, 0x01}
 // The default array width provided with this API, this is the default value of the SizeArrayWidth
 const defaultArrayWidth = 4
 
-// The total size of the HMAC signature, default is 32. If changed in code, this should change
-const hmacSize = 32
-
 // The number of bytes that constitute the size of the proto.Message sent/received
 // This variable is made visible so that developers can support larger data sizes
 var SizeArrayWidth = defaultArrayWidth
@@ -249,6 +246,11 @@ func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message, dec
 	// get the message type bytes
 	messageType:= readSize(conn)
 	msg = proto.Clone(identMap[messageType])
+	// get the size of the hmac if it is encrypted
+	var hmacSize int
+	if encrypted {
+		hmacSize = readSize(conn)
+	}
 	// get the size of the next message
 	size := readSize(conn)
 	// create a byte buffer that will store the whole expected message
@@ -263,7 +265,7 @@ func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message, dec
 		checkError(errors.New("message size discrepancy while sending"))
 	}
 	if encrypted {
-		err := decryptProtobuf(v, &msg, decryptKey, hmacKey)
+		err := decryptProtobuf(v, &msg, hmacSize, decryptKey, hmacKey)
 		checkError(err)
 	} else {
 		err = proto.Unmarshal(v, msg)
@@ -273,7 +275,7 @@ func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message, dec
 }
 
 // Decrypts, authenticates and unmarshals a protobuf message using the given encrypt/decrypt key and hmac key
-func decryptProtobuf(rawData []byte, msg *proto.Message, decryptKey *[32]byte, hmacKey *[32]byte) (err error) {
+func decryptProtobuf(rawData []byte, msg *proto.Message, hmacSize int, decryptKey *[32]byte, hmacKey *[32]byte) (err error) {
 	debug("Decrypting a byte slice of size %v", len(rawData))
 	defer recoverPanic(func(e error) {
 		fail("decryption issue: %v", e)
@@ -285,9 +287,8 @@ func decryptProtobuf(rawData []byte, msg *proto.Message, decryptKey *[32]byte, h
 	checkError(err)
 
 	// split the hmac signature from the real data based hmacSize
-	hmacIndex := hmacSize - 1
-	mac := decryptedBytes[:hmacIndex]
-	realData := decryptedBytes[hmacIndex:]
+	mac := decryptedBytes[:hmacSize]
+	realData := decryptedBytes[hmacSize:]
 
 	// check the hmac signature to ensure authenticity
 	if CheckHMAC(realData,mac,hmacKey) {
@@ -315,6 +316,7 @@ func encryptProtobuf(pb proto.Message, typeVal int,  encryptKey *[32]byte, hmacK
 
 	// sign the data
 	mac := GenerateHMAC(rawData, hmacKey)
+	macSize := len(mac)
 	data := append(mac, rawData...)
 
 	// encrypt the data
@@ -324,6 +326,7 @@ func encryptProtobuf(pb proto.Message, typeVal int,  encryptKey *[32]byte, hmacK
 
 	// build the byte slice that will be the TCP packet sent on the tcp stream
 	result := append(ProtoPreamble, SizeWriter(typeVal)...)
+	result = append(result, SizeWriter(macSize)...)
 	result = append(result, SizeWriter(encryptedMsgSize)...)
 	result = append(result, encryptedMsg...)
 	debug("Encrypt complete, result: %v", result)
