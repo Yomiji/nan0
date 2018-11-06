@@ -18,6 +18,7 @@ import (
 	"time"
 	"encoding/base64"
 	"hash/fnv"
+	"runtime"
 )
 
 /*************
@@ -36,32 +37,64 @@ var (
 	Error = log.New(os.Stderr, "Nan0 [ERROR]: ", log.Ldate|log.Ltime)
 	Debug *log.Logger = nil
 )
+//Toggle line numbers for output messages
+var infoLine = false
+var warnLine = false
+var failLine = false
+var debugLine = false
+
+func ToggleLineNumberPrinting(info,warn,fail,debug bool) {
+	infoLine = info
+	warnLine = warn
+	failLine = fail
+	debugLine = debug
+}
 
 // Wrapper around the Info global log that allows for this api to log to that level correctly
 func info(msg string, vars ...interface{}) {
 	if Info != nil {
-		Info.Printf(msg, vars...)
+		var formattedMsg = msg
+		if infoLine {
+			_, fn, line, _ := runtime.Caller(1)
+			formattedMsg = fmt.Sprintf("%s:%d %s", fn, line, msg)
+		}
+		Info.Printf(formattedMsg, vars...)
 	}
 }
 
 // Wrapper around the Warn global log that allows for this api to log to that level correctly
 func warn(msg string, vars ...interface{}) {
 	if Warn != nil {
-		Warn.Printf(msg, vars...)
+		var formattedMsg = msg
+		if warnLine {
+			_, fn, line, _ := runtime.Caller(1)
+			formattedMsg = fmt.Sprintf("%s:%d %s", fn, line, msg)
+		}
+		Warn.Printf(formattedMsg, vars...)
 	}
 }
 
 // Wrapper around the Error global log that allows for this api to log to that level correctly
 func fail(msg string, vars ...interface{}) {
 	if Error != nil {
-		Error.Printf(msg, vars...)
+		var formattedMsg = msg
+		if failLine {
+			_, fn, line, _ := runtime.Caller(1)
+			formattedMsg = fmt.Sprintf("%s:%d %s", fn, line, msg)
+		}
+		Error.Printf(formattedMsg,  vars...)
 	}
 }
 
 // Wrapper around the Debug global log that allows for this api to log to that level correctly
 func debug(msg string, vars ...interface{}) {
 	if Debug != nil {
-		Debug.Printf(msg, vars...)
+		var formattedMsg = msg
+		if debugLine {
+			_, fn, line, _ := runtime.Caller(1)
+			formattedMsg = fmt.Sprintf("%s:%d %s", fn, line, msg)
+		}
+		Debug.Printf(formattedMsg, vars...)
 	}
 }
 
