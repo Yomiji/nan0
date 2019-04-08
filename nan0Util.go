@@ -5,18 +5,12 @@ import (
 	"fmt"
 	"github.com/golang/protobuf/proto"
 	"net"
-		"os"
+	"os"
 	"log"
 	"errors"
 	"io"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"crypto/hmac"
-	"crypto/sha512"
 	"reflect"
 	"time"
-	"encoding/base64"
 	"hash/fnv"
 	"runtime"
 )
@@ -167,7 +161,7 @@ var SizeWriter = func(size int) (bytes []byte) {
 	Helper Functions
 *************************/
 
-// From 
+// From
 func hashString(s string) uint32 {
 		h := fnv.New32a()
 	h.Write([]byte(s))
@@ -209,7 +203,7 @@ func recoverPanic(errfunc func(error)) func() {
 //  2. The protobuf type identifier (4 bytes)
 //	3. The size of the following protocol buffer message (defaults to 4 bytes)
 // 	4. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
-func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[string]int, encryptKey *[32]byte, hmacKey *[32]byte) (err error) {
+func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[string]int) (err error) {
 	defer recoverPanic(func(e error) {
 		fail("Message failed to send: %v due to %v", pb, e)
 		err = e
@@ -222,22 +216,15 @@ func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[stri
 		checkError(errors.New("type value for message not present"))
 	}
 
-	// if type cannot be found, fail and keep going
-	encrypted := encryptKey != nil && hmacKey != nil
-
 	var bigBytes []byte
-	if encrypted {
-		bigBytes = encryptProtobuf(pb, typeVal, encryptKey, hmacKey)
-	} else {
-		// marshal the protobuf message
-		v, err := proto.Marshal(pb)
-		checkError(err)
-		protoSize := len(v)
-		//prepare all items
-		bigBytes = append(ProtoPreamble, SizeWriter(typeVal)...)
-		bigBytes = append(bigBytes, SizeWriter(protoSize)...)
-		bigBytes = append(bigBytes, v...)
-	}
+	// marshal the protobuf message
+	v, err := proto.Marshal(pb)
+	checkError(err)
+	protoSize := len(v)
+	//prepare all items
+	bigBytes = append(ProtoPreamble, SizeWriter(typeVal)...)
+	bigBytes = append(bigBytes, SizeWriter(protoSize)...)
+	bigBytes = append(bigBytes, v...)
 
 	// write the preamble, sizes and message
 	debug("Writing to connection")
@@ -260,15 +247,12 @@ func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[stri
 //  2. The protobuf type identifier (4 bytes)
 //	3. The size of the following protocol buffer message (defaults to 4 bytes)
 // 	4. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
-func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message, decryptKey *[32]byte, hmacKey *[32]byte) (msg proto.Message, err error) {
+func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message) (msg proto.Message, err error) {
 	defer recoverPanic(func(e error) {
 		fail("Failed to receive message due to %v", e)
 		msg = nil
 		err = e
 	})()
-
-	// determine if this is an encrypted msg
-	encrypted := decryptKey != nil && hmacKey != nil
 
 	// check the preamble
 	err = isPreambleValid(conn)
@@ -279,11 +263,7 @@ func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message, dec
 	// get the message type bytes
 	messageType:= readSize(conn)
 	msg = proto.Clone(identMap[messageType])
-	// get the size of the hmac if it is encrypted
-	var hmacSize int
-	if encrypted {
-		hmacSize = readSize(conn)
-	}
+
 	// get the size of the next message
 	size := readSize(conn)
 	// create a byte buffer that will store the whole expected message
@@ -297,73 +277,11 @@ func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message, dec
 	if count != size {
 		checkError(errors.New("message size discrepancy while sending"))
 	}
-	if encrypted {
-		err := decryptProtobuf(v, &msg, hmacSize, decryptKey, hmacKey)
-		checkError(err)
-	} else {
-		err = proto.Unmarshal(v, msg)
-		checkError(err)
-	}
+
+	err = proto.Unmarshal(v, msg)
+	checkError(err)
+
 	return msg, err
-}
-
-// Decrypts, authenticates and unmarshals a protobuf message using the given encrypt/decrypt key and hmac key
-func decryptProtobuf(rawData []byte, msg *proto.Message, hmacSize int, decryptKey *[32]byte, hmacKey *[32]byte) (err error) {
-	debug("Decrypting a byte slice of size %v", len(rawData))
-	defer recoverPanic(func(e error) {
-		fail("decryption issue: %v", e)
-		err = e
-	})()
-
-	// decrypt message
-	decryptedBytes, err := decrypt(rawData, decryptKey)
-	checkError(err)
-
-	// split the hmac signature from the real data based hmacSize
-	mac := decryptedBytes[:hmacSize]
-	realData := decryptedBytes[hmacSize:]
-
-	// check the hmac signature to ensure authenticity
-	if CheckHMAC(realData,mac,hmacKey) {
-		// unmarshal the bytes, placing result into msg
-		err = proto.Unmarshal(realData, *msg)
-		checkError(err)
-		debug("Decrypt completed successfully, result: %v", msg)
-	} else {
-		// fail out if the message authenticity cannot be verified
-		fail("Couldn't decrypt message, authentication failed")
-		checkError(errors.New("authentication failed"))
-	}
-	return err
-}
-
-// Signs and encrypts a marshalled protobuf message using the given encrypt/decrypt key and hmac key
-func encryptProtobuf(pb proto.Message, typeVal int,  encryptKey *[32]byte, hmacKey *[32]byte) []byte {
-	debug("Encrypting %v", pb)
-	defer recoverPanic(func(e error) {
-		fail("decryption issue: %v", e)
-	})()
-	// marshall the message, turning it into bytes
-	rawData, err := proto.Marshal(pb)
-	checkError(err)
-
-	// sign the data
-	mac := GenerateHMAC(rawData, hmacKey)
-	macSize := len(mac)
-	data := append(mac, rawData...)
-
-	// encrypt the data
-	encryptedMsg, err := encrypt(data, encryptKey)
-	encryptedMsgSize := len(encryptedMsg)
-	checkError(err)
-
-	// build the byte slice that will be the TCP packet sent on the tcp stream
-	result := append(ProtoPreamble, SizeWriter(typeVal)...)
-	result = append(result, SizeWriter(macSize)...)
-	result = append(result, SizeWriter(encryptedMsgSize)...)
-	result = append(result, encryptedMsg...)
-	debug("Encrypt complete, result: %v", result)
-	return result
 }
 
 
@@ -401,140 +319,8 @@ func readSize(reader io.Reader) int {
 	return SizeReader(bytes)
 }
 
-// From cryptopasta (https://github.com/gtank/cryptopasta)
-//
-// NewEncryptionKey generates a random 256-bit key for Encrypt() and
-// Decrypt(). It panics if the source of randomness fails.
-func NewEncryptionKey() *[32]byte {
-	key := [32]byte{}
-	_, err := io.ReadFull(rand.Reader, key[:])
-	if err != nil {
-		panic(err)
-	}
-	return &key
-}
-
-// From cryptopasta (https://github.com/gtank/cryptopasta)
-//
-// Encrypt encrypts data using 256-bit AES-GCM.  This both hides the content of
-// the data and provides a check that it hasn't been altered. Output takes the
-// form nonce|ciphertext|tag where '|' indicates concatenation.
-func encrypt(plaintext []byte, key *[32]byte) (ciphertext []byte, err error) {
-	block, err := aes.NewCipher(key[:])
-	if err != nil {
-		return nil, err
-	}
-
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-
-	nonce := make([]byte, gcm.NonceSize())
-	_, err = io.ReadFull(rand.Reader, nonce)
-	if err != nil {
-		return nil, err
-	}
-
-	return gcm.Seal(nonce, nonce, plaintext, nil), nil
-}
-
-// From cryptopasta (https://github.com/gtank/cryptopasta)
-//
-// Decrypt decrypts data using 256-bit AES-GCM.  This both hides the content of
-// the data and provides a check that it hasn't been altered. Expects input
-// form nonce|ciphertext|tag where '|' indicates concatenation.
-func decrypt(ciphertext []byte, key *[32]byte) (plaintext []byte, err error) {
-	block, err := aes.NewCipher(key[:])
-	if err != nil {
-		return nil, err
-	}
-
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(ciphertext) < gcm.NonceSize() {
-		return nil, errors.New("malformed ciphertext")
-	}
-
-	return gcm.Open(nil,
-		ciphertext[:gcm.NonceSize()],
-		ciphertext[gcm.NonceSize():],
-		nil,
-	)
-}
-
-// From cryptopasta (https://github.com/gtank/cryptopasta)
-//
-// NewHMACKey generates a random 256-bit secret key for HMAC use.
-// Because key generation is critical, it panics if the source of randomness fails.
-func NewHMACKey() *[32]byte {
-
-	key := &[32]byte{}
-
-	_, err := io.ReadFull(rand.Reader, key[:])
-
-	if err != nil {
-
-		panic(err)
-
-	}
-
-	return key
-}
-
-// From cryptopasta (https://github.com/gtank/cryptopasta)
-//
-// GenerateHMAC produces a symmetric signature using a shared secret key.
-func GenerateHMAC(data []byte, key *[32]byte) []byte {
-
-	h := hmac.New(sha512.New512_256, key[:])
-
-	h.Write(data)
-
-	return h.Sum(nil)
-}
-
-// From cryptopasta (https://github.com/gtank/cryptopasta)
-//
-// CheckHMAC securely checks the supplied MAC against a message using the shared secret key.
-func CheckHMAC(data, suppliedMAC []byte, key *[32]byte) bool {
-
-	expectedMAC := GenerateHMAC(data, key)
-
-	return hmac.Equal(expectedMAC, suppliedMAC)
-}
-
-// A simple function to make the keys generated a sharable string
-func ShareKeys() (encKeyShare, authKeyShare string) {
-	encKeyBytes := NewEncryptionKey()
-	authKeyBytes := NewHMACKey()
-
-	encKeyShare = base64.StdEncoding.EncodeToString(encKeyBytes[:])
-	authKeyShare = base64.StdEncoding.EncodeToString(authKeyBytes[:])
-
-	return
-}
-
-// The nan0 functions require a specific key type and width, this is a way to make
-// that conversion from strings to the required type.
-func KeysToNan0Bytes(encKeyShare, authKeyShare string) (encKey, authKey *[32]byte) {
-	encKeyBytes, _ := base64.StdEncoding.DecodeString(encKeyShare)
-	authkeyBytes, _ := base64.StdEncoding.DecodeString(authKeyShare)
-
-	encKey = &[32]byte{}
-	authKey = &[32]byte{}
-	copy(encKey[:], encKeyBytes)
-	copy(authKey[:], authkeyBytes)
-
-	return
-}
-
-
 // Builds a wrapped server instance that will provide a channel of wrapped connections
-func buildServer(nsb *SecureNanoBuilder, customHandler func(net.Listener, *SecureNanoBuilder, <-chan bool)) (server *Nan0Server, err error) {
+func buildServer(nsb *NanoBuilder, customHandler func(net.Listener, *NanoBuilder, <-chan bool)) (server *Nan0Server, err error) {
 	defer recoverPanic(func(e error) {
 		fail("Error occurred while serving %v: %v", server.service.ServiceName, e)
 		err = e

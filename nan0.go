@@ -38,7 +38,7 @@ type Nan0 struct {
 
 // Start the active receiver for this Nan0 connection. This enables the 'receiver' channel,
 // constantly reads from the open connection and places the received message on receiver channel
-func (n Nan0) startServiceReceiver(identMap map[int] proto.Message, decryptKey *[32]byte, hmacKey *[32]byte) {
+func (n Nan0) startServiceReceiver(identMap map[int] proto.Message) {
 	defer recoverPanic(func(e error) {
 		fail("Connection to %v receiver service error occurred: %v", n.GetServiceName(), e)
 		n.Close()
@@ -52,7 +52,7 @@ func (n Nan0) startServiceReceiver(identMap map[int] proto.Message, decryptKey *
 			err := n.conn.SetReadDeadline(time.Now().Add(TCPTimeout))
 			checkError(err)
 
-			newMsg, err := getMessageFromConnection(n.conn, identMap, decryptKey, hmacKey)
+			newMsg, err := getMessageFromConnection(n.conn, identMap)
 			if err != nil && newMsg == nil {
 				panic(err)
 			}
@@ -73,7 +73,7 @@ func (n Nan0) startServiceReceiver(identMap map[int] proto.Message, decryptKey *
 
 // Start the active sender for this Nan0 connection. This enables the 'sender' channel and allows the user to send
 // protocol buffer messages to the server
-func (n Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActive bool, encryptKey *[32]byte, hmacKey *[32]byte) {
+func (n Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActive bool) {
 	defer recoverPanic(func(e error) {
 		fail("Connection to %v sender service error occurred: %v", n.GetServiceName(), e)
 		n.Close()
@@ -91,7 +91,7 @@ func (n Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActiv
 			select {
 			case pb := <- n.sender:
 				debug("Sending message %v", pb)
-				err := putMessageInConnection(n.conn, pb.(proto.Message), inverseMap, encryptKey, hmacKey)
+				err := putMessageInConnection(n.conn, pb.(proto.Message), inverseMap)
 				if err != nil {
 					fail("Error occurred while sending message: %v", err)
 				}

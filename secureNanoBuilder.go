@@ -6,27 +6,25 @@ import (
 	"reflect"
 )
 
-type SecureNanoBuilder struct {
+type NanoBuilder struct {
 	ns                      *Service
 	writeDeadlineActive     bool
 	messageIdentMap			map[int]proto.Message
 	inverseIdentMap			map[string]int
 	sendBuffer              int
 	receiveBuffer           int
-	encdecKey               *[32]byte
-	hmacKey                 *[32]byte
 }
 
-func (ns *Service) NewNanoBuilder() *SecureNanoBuilder {
-	var builder = new(SecureNanoBuilder)
+func (ns *Service) NewNanoBuilder() *NanoBuilder {
+	var builder = new(NanoBuilder)
 	builder.messageIdentMap = make(map[int]proto.Message)
 	builder.inverseIdentMap = make(map[string]int)
 	builder.ns = ns
 	return builder
 }
 
-// Part of the SecureNanoBuilder chain, sets write deadline to the TCPTimeout global value
-func (sec *SecureNanoBuilder) ToggleWriteDeadline(writeDeadline bool) *SecureNanoBuilder {
+// Part of the NanoBuilder chain, sets write deadline to the TCPTimeout global value
+func (sec *NanoBuilder) ToggleWriteDeadline(writeDeadline bool) *NanoBuilder {
 	sec.writeDeadlineActive = writeDeadline
 	return sec
 }
@@ -34,7 +32,7 @@ func (sec *SecureNanoBuilder) ToggleWriteDeadline(writeDeadline bool) *SecureNan
 // Adds multiple identity-type objects that will be cloned to either send or receive messages.
 // All protocol buffers you intend to send or receive should be registered with this method
 // or the transmissions will fail
-func (sec *SecureNanoBuilder) AddMessageIdentities(messageIdents ...proto.Message) *SecureNanoBuilder {
+func (sec *NanoBuilder) AddMessageIdentities(messageIdents ...proto.Message) *NanoBuilder {
 	for _,ident := range messageIdents {
 		sec.AddMessageIdentity(ident)
 	}
@@ -44,7 +42,7 @@ func (sec *SecureNanoBuilder) AddMessageIdentities(messageIdents ...proto.Messag
 // Adds a single identity-type object that will be cloned to either send or receive messages.
 // All protocol buffers you intend to send or receive should be registered with this method
 // or the transmissions will fail
-func (sec *SecureNanoBuilder) AddMessageIdentity(messageIdent proto.Message) *SecureNanoBuilder {
+func (sec *NanoBuilder) AddMessageIdentity(messageIdent proto.Message) *NanoBuilder {
 	t := reflect.TypeOf(messageIdent).String()
 	i := int(hashString(t))
 	sec.messageIdentMap[i] = messageIdent
@@ -52,28 +50,21 @@ func (sec *SecureNanoBuilder) AddMessageIdentity(messageIdent proto.Message) *Se
 	return sec
 }
 
-// Part of the SecureNanoBuilder chain, sets the number of messages that can be simultaneously placed on the send buffer
-func (sec *SecureNanoBuilder) SendBuffer(sendBuffer int) *SecureNanoBuilder {
+// Part of the NanoBuilder chain, sets the number of messages that can be simultaneously placed on the send buffer
+func (sec *NanoBuilder) SendBuffer(sendBuffer int) *NanoBuilder {
 	sec.sendBuffer = sendBuffer
 	return sec
 }
 
-// Part of the SecureNanoBuilder chain, sets the number of messages that can be simultaneously placed on the
+// Part of the NanoBuilder chain, sets the number of messages that can be simultaneously placed on the
 // receive buffer
-func (sec *SecureNanoBuilder) ReceiveBuffer(receiveBuffer int) *SecureNanoBuilder {
+func (sec *NanoBuilder) ReceiveBuffer(receiveBuffer int) *NanoBuilder {
 	sec.receiveBuffer = receiveBuffer
 	return sec
 }
 
-// Part of the SecureNanoBuilder chain, used internally
-func (sec *SecureNanoBuilder) EnableEncryption(secretKey *[32]byte, authKey *[32]byte) *SecureNanoBuilder {
-	sec.encdecKey = secretKey
-	sec.hmacKey = authKey
-	return sec
-}
-
 // Establish a connection creating a first-class Nan0 connection which will communicate with the server
-func (sec SecureNanoBuilder) Build() (nan0 NanoServiceWrapper, err error) {
+func (sec NanoBuilder) Build() (nan0 NanoServiceWrapper, err error) {
 	defer recoverPanic(func(e error) {
 		nan0 = &Nan0{
 			ServiceName:    sec.ns.ServiceName,
@@ -95,12 +86,12 @@ func (sec SecureNanoBuilder) Build() (nan0 NanoServiceWrapper, err error) {
 }
 
 // Build a wrapped server instance
-func (sec *SecureNanoBuilder) BuildServer(handler func(net.Listener, *SecureNanoBuilder, <-chan bool)) (*Nan0Server, error) {
+func (sec *NanoBuilder) BuildServer(handler func(net.Listener, *NanoBuilder, <-chan bool)) (*Nan0Server, error) {
 	return buildServer(sec, handler)
 }
 
 // Wrap a raw connection which will communicate with the server
-func (sec SecureNanoBuilder) WrapConnection(conn net.Conn) (nan0 NanoServiceWrapper, err error) {
+func (sec NanoBuilder) WrapConnection(conn net.Conn) (nan0 NanoServiceWrapper, err error) {
 	defer recoverPanic(func(e error) {
 		nan0 = &Nan0{
 			ServiceName:    sec.ns.ServiceName,
@@ -126,7 +117,7 @@ func (sec SecureNanoBuilder) WrapConnection(conn net.Conn) (nan0 NanoServiceWrap
 		closeComplete:  make(chan bool, 2),
 	}
 
-	go nan0.startServiceReceiver(sec.messageIdentMap, sec.encdecKey, sec.hmacKey)
-	go nan0.startServiceSender(sec.inverseIdentMap, sec.writeDeadlineActive,  sec.encdecKey, sec.hmacKey)
+	go nan0.startServiceReceiver(sec.messageIdentMap)
+	go nan0.startServiceSender(sec.inverseIdentMap, sec.writeDeadlineActive)
 	return nan0, err
 }

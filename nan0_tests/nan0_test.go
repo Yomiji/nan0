@@ -5,7 +5,7 @@ import (
 	"time"
 	"github.com/golang/protobuf/proto"
 	"io"
-	"github.com/Yomiji/nan0"
+	"nan0"
 	"github.com/golang/protobuf/ptypes/any"
 	"fmt"
 )
@@ -148,10 +148,8 @@ func TestService_DialNan0Secure(t *testing.T) {
 
 	}()
 	serviceMsg := proto.Clone(new(nan0.Service))
-	encryptionKey := nan0.NewEncryptionKey()
-	hmacKey := nan0.NewHMACKey()
 
-	n, err := ns.DialNan0Secure(encryptionKey, hmacKey).
+	n, err := ns.DialNan0().
 		ToggleWriteDeadline(true).
 		AddMessageIdentity(serviceMsg).
 		SendBuffer(0).
@@ -179,15 +177,12 @@ func Test_BuildServer(t *testing.T) {
 		ServiceType: "Test",
 		StartTime:   time.Now().Unix(),
 	}
-	encryptionKey := nan0.NewEncryptionKey()
-	hmacKey := nan0.NewHMACKey()
 
 	builder := ns.DialNan0().
 		AddMessageIdentity(proto.Clone(new(nan0.Service))).
 		SendBuffer(1).
 		ReceiveBuffer(1).
-		ToggleWriteDeadline(true).
-		EnableEncryption(encryptionKey, hmacKey)
+		ToggleWriteDeadline(true)
 	server,err := builder.BuildServer(nil)
 	defer server.Shutdown()
 	if err != nil {

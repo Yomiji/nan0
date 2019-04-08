@@ -4,8 +4,8 @@ import "github.com/golang/protobuf/proto"
 
 // Any object which wraps a connection to send and receive different protocol buffers
 type NanoServiceWrapper interface {
-	startServiceSender(map[string]int , bool, *[32]byte, *[32]byte)
-	startServiceReceiver(map[int] proto.Message, *[32]byte, *[32]byte)
+	startServiceSender(map[string]int , bool)
+	startServiceReceiver(map[int] proto.Message)
 	// Close the wrapper goroutines and the underlying connections
 	Close()
 	// Check if the wrapper is closed

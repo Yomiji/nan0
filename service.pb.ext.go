@@ -59,11 +59,6 @@ func (ns Service) DialTCP() (nan0 net.Conn, err error) {
 }
 
 // Create a connection to this nanoservice using the Nan0 wrapper around a protocol buffer service layer
-func (ns Service) DialNan0() *SecureNanoBuilder {
+func (ns Service) DialNan0() *NanoBuilder {
 	return ns.NewNanoBuilder()
-}
-
-// Start the process of creating a secure nanoservice using a builder for the parameters
-func (ns Service) DialNan0Secure(secretKey *[32]byte, authKey *[32]byte) *SecureNanoBuilder {
-	return ns.NewNanoBuilder().EnableEncryption(secretKey, authKey)
 }
