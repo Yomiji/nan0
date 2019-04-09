@@ -17,8 +17,7 @@ func (ns Service) IsExpired() bool {
 
 // Checks if this nanoservice is responding to tcp on its port
 func (ns Service) IsAlive() bool {
-	address := composeTcpAddress(ns.HostName, ns.Port)
-	conn, err := net.Dial("tcp", address)
+	conn, err := net.Dial("tcp", composeTcpAddress(ns.HostName, ns.Port))
 	defer func() {
 		if conn != nil {
 			conn.Close()

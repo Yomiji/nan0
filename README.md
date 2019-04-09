@@ -4,9 +4,11 @@
 This framework is designed to make it easier to pass messages between nanoservices, which are just a fancy name for
 lightweight microservices that compose some of my work. This framework supports developers in creating stream-based communications for protocol buffers over raw tcp connections.
 The key features of this framework include:
-1.  Quickly establish server and client communication objects using distinct builder pattern
-2.  Pass protobuf-based objects directly into a channel to both clients and servers
-3.  Silently encrypt all objects passed between server and client
+
+* Quickly establish server and client communication objects using distinct builder pattern
+
+* Pass protobuf-based objects directly into a channel to both clients and servers
+
 ##### Usage
 When I put together the framework, I needed a way to build the services without having to worry about the network
 transport protocols, message handshaking and so forth. Here are the primary uses and caveats:
