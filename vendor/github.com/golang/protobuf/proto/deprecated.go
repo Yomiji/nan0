@@ -1,6 +1,6 @@
 // Go support for Protocol Buffers - Google's data interchange format
 //
-// Copyright 2010 The Go Authors.  All rights reserved.
+// Copyright 2018 The Go Authors.  All rights reserved.
 // https://github.com/golang/protobuf
 //
 // Redistribution and use in source and binary forms, with or without
@@ -29,74 +29,35 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-syntax = "proto2";
+package proto
 
-import "extension_base/extension_base.proto";
-import "extension_extra/extension_extra.proto";
+import "errors"
 
-package extension_user;
+// Deprecated: do not use.
+type Stats struct{ Emalloc, Dmalloc, Encode, Decode, Chit, Cmiss, Size uint64 }
 
-option go_package = "github.com/golang/protobuf/protoc-gen-go/testdata/extension_user";
+// Deprecated: do not use.
+func GetStats() Stats { return Stats{} }
 
-message UserMessage {
-  optional string name = 1;
-  optional string rank = 2;
+// Deprecated: do not use.
+func MarshalMessageSet(interface{}) ([]byte, error) {
+	return nil, errors.New("proto: not implemented")
 }
 
-// Extend with a message
-extend extension_base.BaseMessage {
-  optional UserMessage user_message = 5;
+// Deprecated: do not use.
+func UnmarshalMessageSet([]byte, interface{}) error {
+	return errors.New("proto: not implemented")
 }
 
-// Extend with a foreign message
-extend extension_base.BaseMessage {
-  optional extension_extra.ExtraMessage extra_message = 9;
+// Deprecated: do not use.
+func MarshalMessageSetJSON(interface{}) ([]byte, error) {
+	return nil, errors.New("proto: not implemented")
 }
 
-// Extend with some primitive types
-extend extension_base.BaseMessage {
-  optional int32 width = 6;
-  optional int64 area = 7;
+// Deprecated: do not use.
+func UnmarshalMessageSetJSON([]byte, interface{}) error {
+	return errors.New("proto: not implemented")
 }
 
-// Extend inside the scope of another type
-message LoudMessage {
-  extend extension_base.BaseMessage {
-    optional uint32 volume = 8;
-  }
-  extensions 100 to max;
-}
-
-// Extend inside the scope of another type, using a message.
-message LoginMessage {
-  extend extension_base.BaseMessage {
-    optional UserMessage user_message = 16;
-  }
-}
-
-// Extend with a repeated field
-extend extension_base.BaseMessage {
-  repeated Detail detail = 17;
-}
-
-message Detail {
-  optional string color = 1;
-}
-
-// An extension of an extension
-message Announcement {
-  optional string words = 1;
-  extend LoudMessage {
-    optional Announcement loud_ext = 100;
-  }
-}
-
-// Something that can be put in a message set.
-message OldStyleParcel {
-  extend extension_base.OldStyleMessage {
-    optional OldStyleParcel message_set_extension = 2001;
-  }
-
-  required string name = 1;
-  optional int32 height = 2;
-}
+// Deprecated: do not use.
+func RegisterMessageSetType(Message, int32, string) {}
