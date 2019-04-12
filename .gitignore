@@ -102,3 +102,4 @@ fabric.properties
 .idea/markdown-history.xml
 .idea/codeStyles/codeStyleConfig.xml
 .idea/markdown-navigator.xml
+/vendor/
