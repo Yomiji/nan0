@@ -5,7 +5,7 @@ import (
 	"time"
 	"github.com/golang/protobuf/proto"
 	"io"
-	"nan0"
+	"github.com/Yomiji/nan0"
 	"github.com/golang/protobuf/ptypes/any"
 	"fmt"
 )

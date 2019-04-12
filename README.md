@@ -28,7 +28,7 @@ transport protocols, message handshaking and so forth. Here are the primary uses
     package main
       
     import (
-          "github.com/yomiji/nan0"
+          "github.com/Yomiji/nan0"
           "time"
           "fmt"
           "github.com/golang/protobuf/proto"
@@ -108,7 +108,7 @@ the default settings may be more verbose than you need.
       package main
       
       import (
-        "github.com/yomiji/nan0"
+        "github.com/Yomiji/nan0"
         "net"
       )
       
