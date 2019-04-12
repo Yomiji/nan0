@@ -10,6 +10,10 @@ The key features of this framework include:
 * Pass protobuf-based objects directly into a channel to both clients and servers
 
 ##### Usage
+In a Dep project, use the 'ensure' command to add the nan0 package as a dependency:
+ ```bash
+     dep ensure -add "github.com/Yomiji/nan0"
+  ```
 When I put together the framework, I needed a way to build the services without having to worry about the network
 transport protocols, message handshaking and so forth. Here are the primary uses and caveats:
 
@@ -119,7 +123,7 @@ the default settings may be more verbose than you need.
     ```
 
 ##### Demo Project
-There is a demo project created using the Nan0 API called [Nan0Chat](https://github.com/yomiji/nan0chat) . This is a chat application that utilizes the
+There is a demo project created using the Nan0 API called [Nan0Chat](https://github.com/Yomiji/nan0chat) . This is a chat application that utilizes the
 features in Nan0 to communicate securely between a server and multiple clients.
 
 ##### Planned Features
