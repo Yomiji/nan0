@@ -1,5 +1,6 @@
 package nan0
 
+
 // The Nan0Server structure is a wrapper around a service which allows
 // for the acceptance of connections which are wrapped automatically
 // in Nan0 objects. This allows for the communication of protocol buffers

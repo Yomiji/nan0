@@ -45,16 +45,9 @@ func (ns Service) Equals(other Service) bool {
 		ns.ServiceType == other.ServiceType
 }
 
-// Starts a listener for this service
+// Starts a tcp listener for this service
 func (ns *Service) Start() (net.Listener, error) {
 	return net.Listen("tcp", composeTcpAddress(ns.HostName, ns.Port))
-}
-
-// Create a connection to this nanoservice using a traditional TCP connection
-func (ns Service) DialTCP() (nan0 net.Conn, err error) {
-	nan0, err = net.Dial("tcp", composeTcpAddress(ns.HostName, ns.Port))
-
-	return nan0, err
 }
 
 // Create a connection to this nanoservice using the Nan0 wrapper around a protocol buffer service layer

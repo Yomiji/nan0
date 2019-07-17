@@ -7,6 +7,7 @@ message Service {
     int32 port = 2;
     int64 startTime = 3;
     string hostName = 4;
-    string serviceName = 5;
-    string serviceType = 6;
+    string uri = 5;
+    string serviceName = 6;
+    string serviceType = 7;
 }

@@ -12,12 +12,21 @@
   revision = "b5d812f8a3706043e23a9cd5babf2e5423744d30"
   version = "v1.3.1"
 
+[[projects]]
+  branch = "master"
+  digest = "1:7427036b6d926b3d1fa0773771820735b35554a98296f1074df440ee30a97296"
+  name = "golang.org/x/net"
+  packages = ["websocket"]
+  pruneopts = "UT"
+  revision = "da137c7871d730100384dbcf36e6f8fa493aef5b"
+
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
     "github.com/golang/protobuf/proto",
     "github.com/golang/protobuf/ptypes/any",
+    "golang.org/x/net/websocket",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1

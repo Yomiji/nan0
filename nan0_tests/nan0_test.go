@@ -1,17 +1,24 @@
 package nan0_tests
 
 import (
+	"fmt"
+	"github.com/Yomiji/nan0"
+	"github.com/golang/protobuf/proto"
+	"github.com/golang/protobuf/ptypes/any"
+	"golang.org/x/net/websocket"
+	"io"
+	"log"
+	"os"
 	"testing"
 	"time"
-	"github.com/golang/protobuf/proto"
-	"io"
-	"github.com/Yomiji/nan0"
-	"github.com/golang/protobuf/ptypes/any"
-	"fmt"
 )
 
 var nsDefaultPort int32 = 2324
-
+func TestMain(m *testing.M) {
+	nan0.Debug = log.New(os.Stdout, "Nan0 [DEBUG]: ", log.Ldate | log.Ltime)
+	nan0.ToggleLineNumberPrinting(true, true, true, true)
+	os.Exit(m.Run())
+}
 func TestNan0_Close(t *testing.T) {
 	ns := &nan0.Service{
 		ServiceName: "TestService",
@@ -206,7 +213,6 @@ func Test_BuildServer(t *testing.T) {
 	}
 	defer client.Close()
 
-	fmt.Println("Sending msg")
 	sender := client.GetSender()
 	sender <- ns
 	receiver := client.GetReceiver()
@@ -214,8 +220,8 @@ func Test_BuildServer(t *testing.T) {
 	select {
 	case msg := <-receiver:
 		t.Logf("Passed, received %v\n", msg)
-	case <-time.After(2 * time.Second):
-		t.Fatal("Failed, did not receive message within allotted time")
+	//case <-time.After(15 * time.Second):
+	//	t.Fatal("Failed, did not receive message within allotted time")
 	}
 }
 
@@ -267,6 +273,94 @@ func TestNan0_MixedOrderMessageIdent(t *testing.T) {
 			t.Fatal("\t\tTest Failed, Nan0 should not be Any")
 	}
 	case <-time.After(2 * time.Second):
+		t.Fatal("\t\tTest Failed, Timeout")
+	}
+}
+
+func TestWebsocketServer(t *testing.T) {
+	ns := &nan0.Service{
+		ServiceName: "TestService",
+		Port:        8080,
+		HostName:    "127.0.0.1",
+		ServiceType: "Test",
+		StartTime:   time.Now().Unix(),
+		Uri: "/",
+	}
+	wsBuilder := ns.NewNanoBuilder().
+		AddMessageIdentity(proto.Clone(new(nan0.Service))).Websocket()
+	wsServer, err := wsBuilder.BuildServer(nil)
+	defer wsServer.Shutdown()
+	if err != nil {
+		t.Fatal("\t\tTest Failed BuildServer failed")
+	}
+	go func() {
+		for ; ; {
+		conn := <-wsServer.GetConnections()
+			select {
+			case msg := <-conn.GetReceiver():
+				fmt.Println("Got the data!!!")
+				conn.GetSender() <- msg
+				conn.Close()
+			}
+		}
+	}()
+	_, err = websocket.Dial("ws://127.0.0.1:8080/", "" ,  "http://localhost/")
+	if err != nil {
+		t.Fatal("\t\tTest Failed, websocket server failed to start")
+	}
+}
+
+func TestWebsocketClient(t *testing.T) {
+	ns := &nan0.Service{
+		ServiceName: "TestService",
+		Port:        8080,
+		HostName:    "",
+		ServiceType: "Test",
+		StartTime:   time.Now().Unix(),
+		Uri:         "/",
+	}
+	wsBuilder := ns.NewNanoBuilder().
+		Websocket().
+		SendBuffer(1).
+		ReceiveBuffer(1).
+		AddMessageIdentity(proto.Clone(new(nan0.Service)))
+	wsServer, err := wsBuilder.BuildServer(nil)
+	//defer wsServer.Shutdown()
+	if err != nil {
+		t.Fatal("\t\tTest Failed BuildServer failed")
+	}
+	defer wsServer.Shutdown()
+	go func() {
+		conn := <-wsServer.GetConnections()
+		t.Logf("Made connection %s", conn.GetServiceName())
+		msg := <-conn.GetReceiver()
+		conn.GetSender() <- msg
+	}()
+
+	ns2 := &nan0.Service{
+		ServiceName: "TestService2",
+		Port:        8080,
+		HostName:    "localhost",
+		ServiceType: "Test",
+		StartTime:   time.Now().Unix(),
+		Uri:         "/",
+	}
+	receiver, _ := ns2.NewNanoBuilder().
+		Websocket().
+		SetOrigin("http://localhost/").
+		AddMessageIdentity(new(nan0.Service)).
+		SendBuffer(1).
+		ReceiveBuffer(1).
+		SendAndAwait(ns)
+	select {
+	case val := <-receiver:
+		if _, ok := val.(nan0.Service); !ok {
+			t.Fatal("\t\tTest Failed, Nan0 service type was not returned from ws")
+		}
+		if val.(nan0.Service).HostName != ns.HostName {
+			t.Fatal("\t\tTest Failed, Values not validated")
+		}
+	case <-time.After(3 * time.Second):
 		t.Fatal("\t\tTest Failed, Timeout")
 	}
 }
