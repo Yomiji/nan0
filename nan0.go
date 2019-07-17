@@ -9,7 +9,6 @@ This API accepts and manages nanoservices
 import (
 	"github.com/golang/protobuf/proto"
 	"net"
-	"sync"
 	"time"
 )
 
@@ -35,11 +34,16 @@ type Nan0 struct {
 	writerShutdown chan bool
 	// Channel governing the shutdown completion
 	closeComplete chan bool
+	// Is this nan0 a websocket?
+	isWebsocket bool
 }
 
+func (n *Nan0) setWebsocket(ws bool) {
+	n.isWebsocket = ws
+}
 // Start the active receiver for this Nan0 connection. This enables the 'receiver' channel,
 // constantly reads from the open connection and places the received message on receiver channel
-func (n Nan0) startServiceReceiver(identMap map[int]proto.Message, group *sync.WaitGroup) {
+func (n Nan0) startServiceReceiver(identMap map[int]proto.Message) {
 	defer recoverPanic(func(e error) {
 		n.Close()
 		fail("Connection to %v receiver service error occurred: %v", n.GetServiceName(), e)
@@ -49,34 +53,44 @@ func (n Nan0) startServiceReceiver(identMap map[int]proto.Message, group *sync.W
 		debug("Shutting down service receiver for %v", n.ServiceName)
 	}()
 	if n.conn != nil && !n.closed {
-		group.Done()
+		var queryInterrupt = make(chan bool, 1)
 		for ; ; {
 			select {
 			case <-n.readerShutdown:
+				queryInterrupt <- true
 				return
 			default:
-				time.Sleep(100*time.Microsecond)
-			}
-			err := n.conn.SetReadDeadline(time.Now().Add(TCPTimeout))
-			checkError(err)
+				err := n.conn.SetReadDeadline(time.Now().Add(TCPTimeout))
+				checkError(err)
 
-			newMsg, err := getMessageFromConnection(n.conn, identMap)
-			if err != nil && newMsg == nil {
-				panic(err)
-			}
+				var newMsg proto.Message
+				if n.isWebsocket {
+					newMsg, err := getMessageFromConnectionWs(n.conn, identMap, queryInterrupt)
+					if err != nil && newMsg == nil {
+						panic(err)
+					}
+				} else {
+					newMsg, err = getMessageFromConnection(n.conn, identMap)
+					if err != nil && newMsg == nil {
+						panic(err)
+					}
+				}
 
-			if newMsg != nil {
-				debug("sending %v on receiver", newMsg)
-				//Send the message received to the awaiting receive buffer
-				n.receiver <- newMsg
+
+				if newMsg != nil {
+					debug("sending %v on receiver", newMsg)
+					//Send the message received to the awaiting receive buffer
+					n.receiver <- newMsg
+				}
 			}
+			time.Sleep(10*time.Microsecond)
 		}
 	}
 }
 
 // Start the active sender for this Nan0 connection. This enables the 'sender' channel and allows the user to send
 // protocol buffer messages to the server
-func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActive bool, group *sync.WaitGroup) {
+func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActive bool) {
 	defer recoverPanic(func(e error) {
 		n.Close()
 		fail("Connection to %v sender service error occurred: %v", n.GetServiceName(), e)
@@ -86,7 +100,6 @@ func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActi
 		debug("Shutting down service sender for %v", n.ServiceName)
 	}()
 	if n.conn != nil && !n.closed {
-		group.Done()
 		for ; ; {
 			select {
 			case <-n.writerShutdown:
@@ -100,10 +113,10 @@ func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActi
 				debug("Sending message %v", pb)
 				err := putMessageInConnection(n.conn, pb.(proto.Message), inverseMap)
 				if err != nil {
-					fail("Error occurred while sending message: %v", err)
+					checkError(err)
 				}
 			default:
-				time.Sleep(100*time.Microsecond)
+				time.Sleep(10*time.Microsecond)
 			}
 		}
 	}
@@ -127,7 +140,6 @@ func (n *Nan0) Close() {
 	_ = n.conn.Close()
 	debug("Dialed connection for server %v closed after shutdown signal received", n.ServiceName)
 	// after goroutines are closed, close the read/write channels
-
 	n.closed = true
 	warn("Connection to %v is shut down!", n.ServiceName)
 }

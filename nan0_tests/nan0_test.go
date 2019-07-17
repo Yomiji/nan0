@@ -244,7 +244,6 @@ func TestNan0_MixedOrderMessageIdent(t *testing.T) {
 	}
 	go func() {
 		conn := <-server.GetConnections()
-		defer conn.Close()
 		for ; ; {
 			select {
 			case msg := <-conn.GetReceiver():
@@ -258,11 +257,12 @@ func TestNan0_MixedOrderMessageIdent(t *testing.T) {
 		AddMessageIdentities(proto.Clone(new(any.Any)), proto.Clone(new(nan0.Service))).
 		ToggleWriteDeadline(true)
 	n, err := builder2.Build()
-	defer n.Close()
 
 	if err != nil {
 		t.Fatal("\t\tTest Failed, Nan0 failed to connect to service")
 	}
+	defer n.Close()
+
 	sender := n.GetSender()
 	sender <- ns
 	receiver := n.GetReceiver()
@@ -272,7 +272,8 @@ func TestNan0_MixedOrderMessageIdent(t *testing.T) {
 		if _, ok := val.(any.Any); ok {
 			t.Fatal("\t\tTest Failed, Nan0 should not be Any")
 	}
-	case <-time.After(2 * time.Second):
+		n.Close()
+	case <-time.After(5 * time.Second):
 		t.Fatal("\t\tTest Failed, Timeout")
 	}
 }
@@ -321,8 +322,8 @@ func TestWebsocketClient(t *testing.T) {
 	}
 	wsBuilder := ns.NewNanoBuilder().
 		Websocket().
-		SendBuffer(1).
-		ReceiveBuffer(1).
+		SendBuffer(0).
+		ReceiveBuffer(0).
 		AddMessageIdentity(proto.Clone(new(nan0.Service)))
 	wsServer, err := wsBuilder.BuildServer(nil)
 	//defer wsServer.Shutdown()
@@ -345,12 +346,13 @@ func TestWebsocketClient(t *testing.T) {
 		StartTime:   time.Now().Unix(),
 		Uri:         "/",
 	}
+
 	receiver, _ := ns2.NewNanoBuilder().
 		Websocket().
 		SetOrigin("http://localhost/").
 		AddMessageIdentity(new(nan0.Service)).
-		SendBuffer(1).
-		ReceiveBuffer(1).
+		SendBuffer(0).
+		ReceiveBuffer(0).
 		SendAndAwait(ns)
 	select {
 	case val := <-receiver:

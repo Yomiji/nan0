@@ -241,24 +241,30 @@ func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[stri
 	return err
 }
 
-func pollUntilReady(conn net.Conn, totalWaitTimeSec float64) (tempBuf []byte, err error) {
+func pollUntilReady(conn net.Conn, totalWaitTimeSec float64, interrupt <-chan bool) (tempBuf []byte, err error) {
 	tempBuf = make([]byte, 1)
 	startTime := time.Now()
 	var accTime float64 = 0
 	var wait = totalWaitTimeSec / float64(time.Second)
 	debug("Polling connection until ready, source: %v dest: %v", conn.LocalAddr(), conn.RemoteAddr())
-	debug ("Polling timeout in %v seconds", wait)
+	debug("Polling timeout in %v seconds", wait)
 	var n int
-	for n, _ = conn.Read(tempBuf); n <= 0 && accTime < wait; n, err = conn.Read(tempBuf) {
+	for n, err = conn.Read(tempBuf); err != nil || n <= 0; n, err = conn.Read(tempBuf) {
+		select {
+		case <-interrupt:
+			break
+		default:
+			time.Sleep(10 * time.Microsecond)
+		}
 		accTime = time.Now().Sub(startTime).Seconds()
-		time.Sleep(100 * time.Microsecond)
+		if accTime > wait {
+			break
+		}
 	}
 	length := n
 	if length > 0 {
-		debug("Ready len %v of %v sec at %v", n, totalWaitTimeSec, accTime)
 		return tempBuf, nil
 	} else {
-		debug("Returning w/o anything")
 		return nil, err
 	}
 }
@@ -273,11 +279,75 @@ func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message) (ms
 		msg = nil
 		err = e
 	})()
+
+	// check the preamble
+	err = isPreambleValid(conn)
+	if err == io.EOF {
+		return nil, nil
+	}
+	checkError(err)
+	// get the message type bytes
+	messageType:= readSize(conn)
+	msg = proto.Clone(identMap[messageType])
+
+	// get the size of the next message
+	size := readSize(conn)
+	// create a byte buffer that will store the whole expected message
+	v := make([]byte, size)
+	// get the protobuf bytes from the reader
+	count, err := conn.Read(v)
+	checkError(err)
+	debug("Read data %v", v)
+
+	// check the number of bytes received matches the bytes expected
+	if count != size {
+		checkError(errors.New("message size discrepancy while sending"))
+	}
+
+	err = proto.Unmarshal(v, msg)
+	checkError(err)
+
+	return msg, err
+}
+
+
+// Checks the preamble bytes to determine if the expected matches
+func isPreambleValid(reader io.Reader) (err error) {
+	defer recoverPanic(func(e error) {
+		debug("preamble issue: %v", e)
+		err = e
+	})()
+	b := make([]byte, len(ProtoPreamble))
+	_, err = reader.Read(b)
+	if err == io.EOF {
+		return io.EOF
+	}
+	checkError(err)
+	debug("checking %v against preamble %v", b, ProtoPreamble)
+	for i,v := range b {
+		if i < len(ProtoPreamble) && v != ProtoPreamble[i] {
+			return errors.New("preamble invalid")
+		}
+	}
+	return  err
+}
+
+// Retrieves the given protocol buffer message from the connection, the connection is expected to send the following:
+// 	1. The preamble bytes stored in ProtoPreamble (defaults to 7 bytes)
+//  2. The protobuf type identifier (4 bytes)
+//	3. The size of the following protocol buffer message (defaults to 4 bytes)
+// 	4. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
+func getMessageFromConnectionWs(conn net.Conn, identMap map[int]proto.Message, interrupt <-chan bool) (msg proto.Message, err error) {
+	defer recoverPanic(func(e error) {
+		debug("Failed to receive message due to %v", e)
+		msg = nil
+		err = e
+	})()
 	debug("call get message")
 	// get total message all at once
-	var buffer = make([]byte,0)
+	var buffer = make([]byte, 0)
 	tempBuf := make([]byte, 1024)
-	buffer, err = pollUntilReady(conn, float64(TCPTimeout))
+	buffer, err = pollUntilReady(conn, float64(TCPTimeout), interrupt)
 	if err != nil {
 		return nil, err
 	}
@@ -288,13 +358,13 @@ func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message) (ms
 		return nil, nil
 	}
 	// get the preamble
-	preamble := buffer[0 : len(ProtoPreamble)]
+	preamble := buffer[0:len(ProtoPreamble)]
 	// check the preamble
-	err = isPreambleValid(preamble)
+	err = isPreambleValidWs(preamble)
 	checkError(err)
 	// get the message type
 	messageTypeIdex := len(ProtoPreamble)
-	messageTypeBuf := buffer[messageTypeIdex : (messageTypeIdex + SizeArrayWidth)]
+	messageTypeBuf := buffer[messageTypeIdex:(messageTypeIdex + SizeArrayWidth)]
 	messageType := SizeReader(messageTypeBuf)
 
 	// clone message using the retrieved message type
@@ -302,12 +372,11 @@ func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message) (ms
 
 	// get the size of the next message
 	sizeIdex := messageTypeIdex + SizeArrayWidth
-	sizeBuf := buffer[sizeIdex : (sizeIdex + SizeArrayWidth)]
+	sizeBuf := buffer[sizeIdex:(sizeIdex + SizeArrayWidth)]
 	size := SizeReader(sizeBuf)
 
-
 	valueIdex := sizeIdex + SizeArrayWidth
-	valueBuf := buffer[valueIdex : ]
+	valueBuf := buffer[valueIdex:]
 
 	count := len(valueBuf)
 
@@ -349,15 +418,14 @@ func makeReceiveChannelFromBuilder(sec NanoBuilder) (buf chan interface{}) {
 }
 
 // Checks the preamble bytes to determine if the expected matches
-func isPreambleValid(readBytes []byte) (err error) {
+func isPreambleValidWs(readBytes []byte) (err error) {
 	defer recoverPanic(func(e error) {
 		debug("preamble issue: %v", e)
 		err = e
 	})()
 
-
 	debug("checking %v against preamble %v", readBytes, ProtoPreamble)
-	for i,v := range readBytes {
+	for i, v := range readBytes {
 		if i < len(ProtoPreamble) && v != ProtoPreamble[i] {
 			return errors.New("preamble invalid")
 		}
@@ -388,8 +456,8 @@ func buildServer(nsb *NanoBuilder, customHandler func(net.Listener, *NanoBuilder
 	server = &Nan0Server{
 		newConnections:   make(chan NanoServiceWrapper, MaxNanoCache),
 		connections:      make([]NanoServiceWrapper, MaxNanoCache),
-		listenerShutdown: make(chan bool, 1),
-		confirmShutdown:  make(chan bool, 1),
+		listenerShutdown: make(chan bool),
+		confirmShutdown:  make(chan bool),
 		closed:           false,
 		service:          nsb.ns,
 	}

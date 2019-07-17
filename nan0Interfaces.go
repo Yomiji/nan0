@@ -2,15 +2,13 @@ package nan0
 
 import (
 	"github.com/golang/protobuf/proto"
-	"sync"
 )
 
 // Any object which wraps a connection to send and receive different protocol buffers
 type NanoServiceWrapper interface {
-	startServiceSender(map[string]int, bool, *sync.WaitGroup)
-	//startServiceSenderWebsocket(map[string]int , bool)
-	startServiceReceiver(map[int]proto.Message, *sync.WaitGroup)
-	//startServiceReceiverWebsocket(map[int] proto.Message)
+	startServiceSender(map[string]int, bool)
+	startServiceReceiver(map[int]proto.Message)
+	setWebsocket(bool)
 
 	// Close the wrapper goroutines and the underlying connections
 	Close()

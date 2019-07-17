@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/http"
 	"reflect"
-	"sync"
 )
 
 type NanoBuilder struct {
@@ -114,7 +113,6 @@ func (sec NanoBuilder) Send(obj interface{}) (ws net.Conn, err error) {
 
 	checkError(err)
 	info("Connection to %v established!", sec.ns.ServiceName)
-
 	err = putMessageInConnection(ws, obj.(proto.Message), sec.inverseIdentMap)
 	return ws, err
 }
@@ -125,10 +123,17 @@ func (sec NanoBuilder) SendAndAwait(obj interface{}) (await chan interface{}, er
 	})()
 	ws,err := sec.Send(obj)
 	checkError(err)
-	msg, err := getMessageFromConnection(ws, sec.messageIdentMap)
+	interrupt := make(chan bool, 1)
+	var msg proto.Message
+	if sec.websocketFlag {
+		msg, err = getMessageFromConnectionWs(ws, sec.messageIdentMap, interrupt)
+	} else {
+		msg, err = getMessageFromConnection(ws, sec.messageIdentMap)
+	}
 	checkError(err)
 	await = makeReceiveChannelFromBuilder(sec)
 	await <- msg
+	interrupt <- true
 	return
 }
 
@@ -143,11 +148,18 @@ func (sec NanoBuilder) WsAwait() (await chan interface{}, err error) {
 		ws, err = net.Dial("tcp", composeTcpAddress(sec.ns.HostName, sec.ns.Port))
 	}
 	checkError(err)
-	msg, err := getMessageFromConnection(ws, sec.messageIdentMap)
+	interrupt := make(chan bool, 1)
+	var msg proto.Message
+	if sec.websocketFlag {
+		msg, err = getMessageFromConnectionWs(ws, sec.messageIdentMap, interrupt)
+	} else {
+		msg, err = getMessageFromConnection(ws, sec.messageIdentMap)
+	}
 	checkError(err)
 
 	await = makeReceiveChannelFromBuilder(sec)
 	await <- msg
+	interrupt <- true
 	return
 }
 
@@ -160,8 +172,8 @@ func (sec *NanoBuilder) buildWebsocketServer() (server *Nan0Server, err error) {
 	server = &Nan0Server{
 		newConnections:   make(chan NanoServiceWrapper, MaxNanoCache),
 		connections:      make([]NanoServiceWrapper, MaxNanoCache),
-		listenerShutdown: make(chan bool, 1),
-		confirmShutdown:  make(chan bool, 1),
+		listenerShutdown: make(chan bool),
+		confirmShutdown:  make(chan bool),
 		closed:           false,
 		service:          sec.ns,
 	}
@@ -174,6 +186,7 @@ func (sec *NanoBuilder) buildWebsocketServer() (server *Nan0Server, err error) {
 		} else {
 			info("Adding: %s", ws.RemoteAddr())
 		}
+		newNano.setWebsocket(true)
 		server.AddConnection(newNano)
 	}
 
@@ -186,13 +199,6 @@ func (sec *NanoBuilder) buildWebsocketServer() (server *Nan0Server, err error) {
 			info("Websocket server %s closed.", server.GetServiceName())
 		}
 	}()
-	//listener,err := sec.ns.Start()
-	//checkError(err)
-	//go func() {
-	//	info("Server %v started!", server.GetServiceName())
-	//	err = http.Serve(listener, websocket.Handler(wsHandler))
-	//	checkError(err)
-	//}()
 
 	// handle shutdown separate from checking for clients
 	go func() {
@@ -241,13 +247,9 @@ func (sec NanoBuilder) WrapConnection(conn net.Conn) (nan0 NanoServiceWrapper, e
 		closeComplete:  make(chan bool, 2),
 	}
 
-	waitGroup := &sync.WaitGroup{}
-	waitGroup.Add(1)
-	go nan0.startServiceReceiver(sec.messageIdentMap, waitGroup)
-	waitGroup.Add(1)
-	go nan0.startServiceSender(sec.inverseIdentMap, sec.writeDeadlineActive, waitGroup)
+	go nan0.startServiceSender(sec.inverseIdentMap, sec.writeDeadlineActive)
+	go nan0.startServiceReceiver(sec.messageIdentMap)
 
-	waitGroup.Wait()
 	debug("[****] Finished waiting for wrapconn")
 	return nan0, err
 }
