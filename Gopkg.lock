@@ -2,23 +2,23 @@
 
 
 [[projects]]
-  digest = "1:00128d98b4ccf1e335a8ee2c2b7676a9c7439e5a93dae0a701bb849b0cc536f4"
+  digest = "1:eef06dae342977adee316a641253da2f14d2f659a06290083c1ce75c3fe0a8a8"
   name = "github.com/golang/protobuf"
   packages = [
     "proto",
     "ptypes/any",
   ]
   pruneopts = "UT"
-  revision = "b5d812f8a3706043e23a9cd5babf2e5423744d30"
-  version = "v1.3.1"
+  revision = "6c65a5562fc06764971b7c5d05c76c75e84bdbf7"
+  version = "v1.3.2"
 
 [[projects]]
-  branch = "master"
-  digest = "1:7427036b6d926b3d1fa0773771820735b35554a98296f1074df440ee30a97296"
-  name = "golang.org/x/net"
-  packages = ["websocket"]
+  digest = "1:7b5c6e2eeaa9ae5907c391a91c132abfd5c9e8a784a341b5625e750c67e6825d"
+  name = "github.com/gorilla/websocket"
+  packages = ["."]
   pruneopts = "UT"
-  revision = "da137c7871d730100384dbcf36e6f8fa493aef5b"
+  revision = "66b9c49e59c6c48f0ffce28c2d8b8a5678502c6d"
+  version = "v1.4.0"
 
 [solve-meta]
   analyzer-name = "dep"
@@ -26,7 +26,7 @@
   input-imports = [
     "github.com/golang/protobuf/proto",
     "github.com/golang/protobuf/ptypes/any",
-    "golang.org/x/net/websocket",
+    "github.com/gorilla/websocket",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1

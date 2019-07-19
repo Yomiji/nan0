@@ -49,8 +49,3 @@ func (ns Service) Equals(other Service) bool {
 func (ns *Service) Start() (net.Listener, error) {
 	return net.Listen("tcp", composeTcpAddress(ns.HostName, ns.Port))
 }
-
-// Create a connection to this nanoservice using the Nan0 wrapper around a protocol buffer service layer
-func (ns Service) DialNan0() *NanoBuilder {
-	return ns.NewNanoBuilder()
-}

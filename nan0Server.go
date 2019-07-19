@@ -1,11 +1,12 @@
 package nan0
 
+import "sync"
 
-// The Nan0Server structure is a wrapper around a service which allows
+// The NanoServer structure is a wrapper around a service which allows
 // for the acceptance of connections which are wrapped automatically
 // in Nan0 objects. This allows for the communication of protocol buffers
 // along channels for each connection.
-type Nan0Server struct {
+type NanoServer struct {
 	// The name of the service
 	service *Service
 	// Each new connection received gets pushed to this channel, wrapped in a Nan0
@@ -18,61 +19,63 @@ type Nan0Server struct {
 	listenerShutdown chan bool
 	// Shutdown confirmation
 	confirmShutdown chan bool
+
+	mutex *sync.Mutex
 }
 
 // Exposes the service delegate's serviceName property
-func (server Nan0Server) GetServiceName() string {
+func (server NanoServer) GetServiceName() string {
 	return server.service.ServiceName
 }
 
 // Exposes the service delegate's serviceType property
-func (server Nan0Server) GetServiceType() string {
+func (server NanoServer) GetServiceType() string {
 	return server.service.ServiceType
 }
 
 // Exposes the service delegate's startTime property
-func (server Nan0Server) GetStartTime() int64 {
+func (server NanoServer) GetStartTime() int64 {
 	return server.service.StartTime
 }
 
 // Exposes the service delegate's hostName property
-func (server Nan0Server) GetHost() string {
+func (server NanoServer) GetHost() string {
 	return server.service.HostName
 }
 
 // Exposes the service delegate's port property
-func (server Nan0Server) GetPort() int32 {
+func (server NanoServer) GetPort() int32 {
 	return server.service.Port
 }
 
 // Exposes the IsExpired method of the service delegate
-func (server Nan0Server) IsExpired() bool {
+func (server NanoServer) IsExpired() bool {
 	return server.service.IsExpired()
 }
 
 // Exposes the IsAlive method of the service delegate
-func (server Nan0Server) IsAlive() bool {
+func (server NanoServer) IsAlive() bool {
 	return server.service.IsAlive()
 }
 
 // Get the channel which is fed new connections to the server
-func (server *Nan0Server) GetConnections() <-chan NanoServiceWrapper {
+func (server *NanoServer) GetConnections() <-chan NanoServiceWrapper {
 	return server.newConnections
 }
 
 // Get all connections that this service has ever opened
-func (server *Nan0Server) GetAllConnections() []NanoServiceWrapper {
+func (server *NanoServer) GetAllConnections() []NanoServiceWrapper {
 	return server.connections
 }
 
 // Puts a connection in the server
-func (server *Nan0Server) AddConnection(conn NanoServiceWrapper) {
+func (server *NanoServer) AddConnection(conn NanoServiceWrapper) {
 	server.connections = append(server.connections, conn)
 	server.newConnections <- conn
 }
 
 // Close all opened connections and clear connection cache
-func (server *Nan0Server) ResetConnections() (total int) {
+func (server *NanoServer) ResetConnections() (total int) {
 	total = len(server.connections)
 	for _,conn := range server.connections {
 		if conn != nil {
@@ -83,17 +86,22 @@ func (server *Nan0Server) ResetConnections() (total int) {
 	return
 }
 
-func (server Nan0Server) IsShutdown() bool {
-	return server.closed
+func (server NanoServer) IsShutdown() bool {
+	server.mutex.Lock()
+	closed := server.closed
+	server.mutex.Unlock()
+	return closed
 }
 
 // Shut down the server
-func (server *Nan0Server) Shutdown() {
+func (server *NanoServer) Shutdown() {
 	if server.IsShutdown() {
 		debug("Service already closed when calling Shutdown() on %v", server.service.ServiceName)
 		return
 	}
+	server.mutex.Lock()
 	server.closed = true
+	server.mutex.Unlock()
 
 	debug("Shutting down server %v", server.service.ServiceName)
 

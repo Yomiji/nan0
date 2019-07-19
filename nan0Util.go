@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/golang/protobuf/proto"
-	"golang.org/x/net/websocket"
+	"github.com/gorilla/websocket"
 	"hash/fnv"
 	"io"
 	"log"
@@ -13,7 +13,7 @@ import (
 	"os"
 	"reflect"
 	"runtime"
-	"strconv"
+	"sync"
 	"time"
 )
 
@@ -121,7 +121,7 @@ func SetLogWriter(w io.Writer) {
 	Service Params
  *******************/
 
-// The max queued connections for Nan0Server handling, used with ListenTCP()
+// The max queued connections for NanoServer handling, used with ListenTCP()
 var MaxNanoCache = 50
 
 // The timeout for TCP Writers and server connections
@@ -241,33 +241,44 @@ func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[stri
 	return err
 }
 
-func pollUntilReady(conn net.Conn, totalWaitTimeSec float64, interrupt <-chan bool) (tempBuf []byte, err error) {
-	tempBuf = make([]byte, 1)
-	startTime := time.Now()
-	var accTime float64 = 0
-	var wait = totalWaitTimeSec / float64(time.Second)
-	debug("Polling connection until ready, source: %v dest: %v", conn.LocalAddr(), conn.RemoteAddr())
-	debug("Polling timeout in %v seconds", wait)
-	var n int
-	for n, err = conn.Read(tempBuf); err != nil || n <= 0; n, err = conn.Read(tempBuf) {
-		select {
-		case <-interrupt:
-			break
-		default:
-			time.Sleep(10 * time.Microsecond)
-		}
-		accTime = time.Now().Sub(startTime).Seconds()
-		if accTime > wait {
-			break
-		}
+// Places the given protocol buffer message in the connection, the connection will receive the following data:
+// 	1. The preamble bytes stored in ProtoPreamble (defaults to 7 bytes)
+//  2. The protobuf type identifier (4 bytes)
+//	3. The size of the following protocol buffer message (defaults to 4 bytes)
+// 	4. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
+func putMessageInConnectionWs(conn *websocket.Conn, pb proto.Message, inverseMap map[string]int) (err error) {
+	defer recoverPanic(func(e error) {
+		debug("Message failed to send: %v due to %v", pb, e)
+		err = e
+	})()
+
+	// figure out if the type of the message is in our list
+	typeString := reflect.TypeOf(pb).String()
+	typeVal, ok := inverseMap[typeString]
+	if !ok {
+		checkError(errors.New("type value for message not present"))
 	}
-	length := n
-	if length > 0 {
-		return tempBuf, nil
-	} else {
-		return nil, err
-	}
+
+	var bigBytes []byte
+	// marshal the protobuf message
+	v, err := proto.Marshal(pb)
+	checkError(err)
+	protoSize := len(v)
+	//prepare all items
+	bigBytes = append(ProtoPreamble, SizeWriter(typeVal)...)
+	bigBytes = append(bigBytes, SizeWriter(protoSize)...)
+	bigBytes = append(bigBytes, v...)
+
+	// write the preamble, sizes and message
+	debug("Writing to connection")
+	err = conn.WriteMessage(websocket.BinaryMessage, bigBytes)
+	checkError(err)
+
+	return err
 }
+
+
+
 // Retrieves the given protocol buffer message from the connection, the connection is expected to send the following:
 // 	1. The preamble bytes stored in ProtoPreamble (defaults to 7 bytes)
 //  2. The protobuf type identifier (4 bytes)
@@ -337,7 +348,7 @@ func isPreambleValid(reader io.Reader) (err error) {
 //  2. The protobuf type identifier (4 bytes)
 //	3. The size of the following protocol buffer message (defaults to 4 bytes)
 // 	4. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
-func getMessageFromConnectionWs(conn net.Conn, identMap map[int]proto.Message, interrupt <-chan bool) (msg proto.Message, err error) {
+func getMessageFromConnectionWs(conn *websocket.Conn, identMap map[int]proto.Message) (msg proto.Message, err error) {
 	defer recoverPanic(func(e error) {
 		debug("Failed to receive message due to %v", e)
 		msg = nil
@@ -345,18 +356,13 @@ func getMessageFromConnectionWs(conn net.Conn, identMap map[int]proto.Message, i
 	})()
 	debug("call get message")
 	// get total message all at once
-	var buffer = make([]byte, 0)
-	tempBuf := make([]byte, 1024)
-	buffer, err = pollUntilReady(conn, float64(TCPTimeout), interrupt)
-	if err != nil {
-		return nil, err
+	var buffer []byte
+	t,buffer,err := conn.ReadMessage()
+	if t != websocket.BinaryMessage {
+		err = errors.New("non binary data read from websocket")
 	}
-	for n, err := conn.Read(tempBuf); err == nil && n > 0; n, err = conn.Read(tempBuf) {
-		buffer = append(buffer, tempBuf[0:n]...)
-	}
-	if err == io.EOF || len(buffer) == 0 {
-		return nil, nil
-	}
+	checkError(err)
+
 	// get the preamble
 	preamble := buffer[0:len(ProtoPreamble)]
 	// check the preamble
@@ -389,15 +395,6 @@ func getMessageFromConnectionWs(conn net.Conn, identMap map[int]proto.Message, i
 	checkError(err)
 
 	return msg, err
-}
-
-func dialWebsocket(sec NanoBuilder) (ws *websocket.Conn, err error) {
-	defer recoverPanic(func(e error) {
-		err = e.(error)
-	})()
-	//paths := strings.Split(sec.ns.Uri, "/")
-	ws, err = websocket.Dial("ws://"+sec.ns.HostName+":"+strconv.Itoa(int(sec.ns.Port))+sec.ns.Uri, "", sec.origin)
-	return ws, err
 }
 
 func makeSendChannelFromBuilder(sec NanoBuilder) (buf chan interface{}) {
@@ -447,19 +444,20 @@ func readSize(reader io.Reader) int {
 }
 
 // Builds a wrapped server instance that will provide a channel of wrapped connections
-func buildServer(nsb *NanoBuilder, customHandler func(net.Listener, *NanoBuilder, <-chan bool)) (server *Nan0Server, err error) {
+func buildServer(nsb *NanoBuilder, customHandler func(net.Listener, *NanoBuilder, <-chan bool)) (server *NanoServer, err error) {
 	defer recoverPanic(func(e error) {
 		fail("Error occurred while serving %v: %v", server.service.ServiceName, e)
 		err = e
 		server = nil
 	})()
-	server = &Nan0Server{
+	server = &NanoServer{
 		newConnections:   make(chan NanoServiceWrapper, MaxNanoCache),
 		connections:      make([]NanoServiceWrapper, MaxNanoCache),
 		listenerShutdown: make(chan bool),
 		confirmShutdown:  make(chan bool),
 		closed:           false,
 		service:          nsb.ns,
+		mutex: &sync.Mutex{},
 	}
 	// start a listener
 	listener, err := nsb.ns.Start()
@@ -473,7 +471,10 @@ func buildServer(nsb *NanoBuilder, customHandler func(net.Listener, *NanoBuilder
 		// check to see if we need to shut everything down
 		<-server.listenerShutdown // close all current connections
 		server.ResetConnections()
-		listener.Close()
+		err := listener.Close()
+		if err != nil {
+			warn("Error encountered while shutting down: %v", err)
+		}
 		server.confirmShutdown <- true
 		return
 	}()

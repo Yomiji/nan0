@@ -2,7 +2,11 @@ package nan0
 
 import (
 	"github.com/golang/protobuf/proto"
-	"golang.org/x/net/websocket"
+	"github.com/gorilla/websocket"
+	"net/url"
+	"sync"
+	"time"
+
 	"net"
 	"net/http"
 	"reflect"
@@ -73,125 +77,74 @@ func (sec *NanoBuilder) ReceiveBuffer(receiveBuffer int) *NanoBuilder {
 	return sec
 }
 
-func (sec *NanoBuilder) SetOrigin(origin string) *NanoBuilder {
-	sec.origin = origin
-	return sec
-}
-
 // Establish a connection creating a first-class Nan0 connection which will communicate with the server
 func (sec NanoBuilder) Build() (nan0 NanoServiceWrapper, err error) {
 	defer recoverPanic(func(e error) {
-		nan0 = &Nan0{
-			ServiceName:    sec.ns.ServiceName,
-			receiver:       nil,
-			sender:         nil,
-			conn:           nil,
-			closed:         true,
-			writerShutdown: nil,
-			readerShutdown: nil,
-		}
+		nan0 = nil
 		err = e.(error)
 	})()
-	conn, err := net.Dial("tcp", composeTcpAddress(sec.ns.HostName, sec.ns.Port))
-	checkError(err)
-	info("Connection to %v established!", sec.ns.ServiceName)
 
+	var conn interface{}
+	// if the connection is a websocket, handle it this way
+	if sec.websocketFlag {
+		// setup a url to dial the websocket, hostname shouldn't include protocol
+		u := url.URL{Scheme:"ws",Host:composeTcpAddress(sec.ns.HostName, sec.ns.Port), Path:sec.ns.Uri}
+		// call the websocket server
+		conn, _, err = websocket.DefaultDialer.Dial(u.String(), nil)
+		checkError(err)
+	} else {
+		// otherwise, handle the connection like this using tcp
+		conn, err = net.Dial("tcp", composeTcpAddress(sec.ns.HostName, sec.ns.Port))
+		checkError(err)
+		info("Connection to %v established!", sec.ns.ServiceName)
+	}
 	return sec.WrapConnection(conn)
 }
 
-// Establish a connection creating a first-class Nan0 connection which will communicate with the server
-func (sec NanoBuilder) Send(obj interface{}) (ws net.Conn, err error) {
-	defer recoverPanic(func(e error) {
-		err = e.(error)
-	})()
-	//paths := strings.Split(sec.ns.Uri, "/")
-	if sec.websocketFlag {
-		ws, err = dialWebsocket(sec)
-	} else {
-		ws, err = net.Dial("tcp", composeTcpAddress(sec.ns.HostName, sec.ns.Port))
-	}
-
-	checkError(err)
-	info("Connection to %v established!", sec.ns.ServiceName)
-	err = putMessageInConnection(ws, obj.(proto.Message), sec.inverseIdentMap)
-	return ws, err
+type handler struct {
+	handleFunc func(w http.ResponseWriter, r *http.Request)
+}
+func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.handleFunc(w, r)
 }
 
-func (sec NanoBuilder) SendAndAwait(obj interface{}) (await chan interface{}, err error) {
-	defer recoverPanic(func(e error) {
-		err = e.(error)
-	})()
-	ws,err := sec.Send(obj)
-	checkError(err)
-	interrupt := make(chan bool, 1)
-	var msg proto.Message
-	if sec.websocketFlag {
-		msg, err = getMessageFromConnectionWs(ws, sec.messageIdentMap, interrupt)
-	} else {
-		msg, err = getMessageFromConnection(ws, sec.messageIdentMap)
-	}
-	checkError(err)
-	await = makeReceiveChannelFromBuilder(sec)
-	await <- msg
-	interrupt <- true
-	return
-}
-
-func (sec NanoBuilder) WsAwait() (await chan interface{}, err error) {
-	defer recoverPanic(func(e error) {
-		err = e.(error)
-	})()
-	var ws net.Conn
-	if sec.websocketFlag {
-		ws, err = dialWebsocket(sec)
-	} else {
-		ws, err = net.Dial("tcp", composeTcpAddress(sec.ns.HostName, sec.ns.Port))
-	}
-	checkError(err)
-	interrupt := make(chan bool, 1)
-	var msg proto.Message
-	if sec.websocketFlag {
-		msg, err = getMessageFromConnectionWs(ws, sec.messageIdentMap, interrupt)
-	} else {
-		msg, err = getMessageFromConnection(ws, sec.messageIdentMap)
-	}
-	checkError(err)
-
-	await = makeReceiveChannelFromBuilder(sec)
-	await <- msg
-	interrupt <- true
-	return
-}
-
-func (sec *NanoBuilder) buildWebsocketServer() (server *Nan0Server, err error) {
+func (sec *NanoBuilder) buildWebsocketServer() (server *NanoServer, err error) {
 	defer recoverPanic(func(e error) {
 		fail("Error occurred while serving %v: %v", server.service.ServiceName, e)
 		err = e
 		server = nil
 	})()
-	server = &Nan0Server{
-		newConnections:   make(chan NanoServiceWrapper, MaxNanoCache),
+	server = &NanoServer{
+		newConnections:   make(chan NanoServiceWrapper),
 		connections:      make([]NanoServiceWrapper, MaxNanoCache),
 		listenerShutdown: make(chan bool),
 		confirmShutdown:  make(chan bool),
 		closed:           false,
 		service:          sec.ns,
+		mutex: &sync.Mutex{},
 	}
 
-	wsHandler := func(ws *websocket.Conn) {
-		ws.PayloadType = websocket.BinaryFrame
-		newNano, err := sec.WrapConnection(ws)
-		if err != nil {
-			warn("Connection dropped due to %v", err)
-		} else {
-			info("Adding: %s", ws.RemoteAddr())
-		}
-		newNano.setWebsocket(true)
-		server.AddConnection(newNano)
+	var upgrader = websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+	}
+
+	handler := &handler{
+		handleFunc: func(w http.ResponseWriter, r *http.Request) {
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				warn("Connection dropped due to %v", err)
+				return
+			} else {
+				info("%s has connected to the server.", conn.RemoteAddr())
+			}
+			newNano, err := sec.WrapConnection(conn)
+			server.AddConnection(newNano)
+		},
 	}
 
 	srv := &http.Server{Addr: composeTcpAddress("", sec.ns.Port)}
-	http.Handle(sec.ns.GetUri(), websocket.Handler(wsHandler))
+	http.Handle(sec.ns.GetUri(), handler)
 	go func() {
 		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 			fail("Websocket server: %s", err)
@@ -204,7 +157,11 @@ func (sec *NanoBuilder) buildWebsocketServer() (server *Nan0Server, err error) {
 	go func() {
 		// check to see if we need to shut everything down
 		<-server.listenerShutdown // close all current connections
-		srv.Close()
+		server.ResetConnections()
+		err := srv.Close()
+		if err != nil {
+			warn("Error encountered while shutting down: %v", err)
+		}
 		server.confirmShutdown <- true
 		return
 	}()
@@ -213,7 +170,7 @@ func (sec *NanoBuilder) buildWebsocketServer() (server *Nan0Server, err error) {
 }
 
 // Build a wrapped server instance
-func (sec *NanoBuilder) BuildServer(handler func(net.Listener, *NanoBuilder, <-chan bool)) (*Nan0Server, error) {
+func (sec *NanoBuilder) BuildServer(handler func(net.Listener, *NanoBuilder, <-chan bool)) (*NanoServer, error) {
 	if sec.websocketFlag {
 		return sec.buildWebsocketServer()
 	}
@@ -221,36 +178,44 @@ func (sec *NanoBuilder) BuildServer(handler func(net.Listener, *NanoBuilder, <-c
 }
 
 // Wrap a raw connection which will communicate with the server
-func (sec NanoBuilder) WrapConnection(conn net.Conn) (nan0 NanoServiceWrapper, err error) {
+func (sec NanoBuilder) WrapConnection(connection interface{}) (nan0 NanoServiceWrapper, err error) {
 	defer recoverPanic(func(e error) {
-		nan0 = &Nan0{
-			ServiceName:    sec.ns.ServiceName,
-			receiver:       nil,
-			sender:         nil,
-			conn:           nil,
-			closed:         true,
-			writerShutdown: nil,
-			readerShutdown: nil,
-		}
+		nan0 = nil
 		err = e.(error)
 	})()
 	checkError(err)
 
-	nan0 = &Nan0{
-		ServiceName:    sec.ns.ServiceName,
-		receiver:       makeReceiveChannelFromBuilder(sec),
-		sender:         makeSendChannelFromBuilder(sec),
-		conn:           conn,
-		closed:         false,
-		writerShutdown: make(chan bool, 1),
-		readerShutdown: make(chan bool, 1),
-		closeComplete:  make(chan bool, 2),
+	switch conn := connection.(type) {
+	case net.Conn:
+		nan0 = &Nan0{
+			ServiceName:    sec.ns.ServiceName,
+			receiver:       makeReceiveChannelFromBuilder(sec),
+			sender:         makeSendChannelFromBuilder(sec),
+			conn:           conn,
+			closed:         false,
+			writerShutdown: make(chan bool, 1),
+			readerShutdown: make(chan bool, 1),
+			closeComplete:  make(chan bool, 2),
+			mutex: &sync.Mutex{},
+		}
+	case *websocket.Conn:
+		nan0 = &WsNan0{
+			ServiceName:    sec.ns.ServiceName,
+			receiver:       makeReceiveChannelFromBuilder(sec),
+			sender:         makeSendChannelFromBuilder(sec),
+			conn:           conn,
+			closed:         false,
+			writerShutdown: make(chan bool, 1),
+			readerShutdown: make(chan bool, 1),
+			closeComplete:  make(chan bool, 2),
+			mutex: &sync.Mutex{},
+		}
 	}
 
-	go nan0.startServiceSender(sec.inverseIdentMap, sec.writeDeadlineActive)
 	go nan0.startServiceReceiver(sec.messageIdentMap)
+	go nan0.startServiceSender(sec.inverseIdentMap, sec.writeDeadlineActive)
+	time.Sleep(10 * time.Microsecond)
 
-	debug("[****] Finished waiting for wrapconn")
 	return nan0, err
 }
 

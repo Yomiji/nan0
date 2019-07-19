@@ -8,7 +8,6 @@ import (
 type NanoServiceWrapper interface {
 	startServiceSender(map[string]int, bool)
 	startServiceReceiver(map[int]proto.Message)
-	setWebsocket(bool)
 
 	// Close the wrapper goroutines and the underlying connections
 	Close()
@@ -28,5 +27,9 @@ type NanoServiceWrapper interface {
 type Server interface {
 	IsAlive() bool
 	IsExpired() bool
+	IsShutdown() bool
 	Shutdown()
+	GetServiceName() string
+	GetConnections() <-chan NanoServiceWrapper
+	AddConnection(NanoServiceWrapper)
 }
