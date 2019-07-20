@@ -103,3 +103,4 @@ fabric.properties
 .idea/codeStyles/codeStyleConfig.xml
 .idea/markdown-navigator.xml
 /vendor/
+/Gopkg.lock
