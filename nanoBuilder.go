@@ -3,12 +3,9 @@ package nan0
 import (
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/websocket"
-	"net/url"
-	"sync"
-	"time"
-
 	"net"
 	"net/http"
+	"net/url"
 	"reflect"
 )
 
@@ -117,11 +114,8 @@ func (sec *NanoBuilder) buildWebsocketServer() (server *NanoServer, err error) {
 	server = &NanoServer{
 		newConnections:   make(chan NanoServiceWrapper),
 		connections:      make([]NanoServiceWrapper, MaxNanoCache),
-		listenerShutdown: make(chan bool),
-		confirmShutdown:  make(chan bool),
 		closed:           false,
 		service:          sec.ns,
-		mutex: &sync.Mutex{},
 	}
 
 	var upgrader = websocket.Upgrader{
@@ -144,33 +138,21 @@ func (sec *NanoBuilder) buildWebsocketServer() (server *NanoServer, err error) {
 	}
 
 	srv := &http.Server{Addr: composeTcpAddress("", sec.ns.Port)}
+	server.wsServer = srv
 	http.Handle(sec.ns.GetUri(), handler)
-	go func() {
+	go func(serviceName string) {
 		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 			fail("Websocket server: %s", err)
 		} else {
-			info("Websocket server %s closed.", server.GetServiceName())
+			info("Websocket server %s closed.", serviceName)
 		}
-	}()
-
-	// handle shutdown separate from checking for clients
-	go func() {
-		// check to see if we need to shut everything down
-		<-server.listenerShutdown // close all current connections
-		server.ResetConnections()
-		err := srv.Close()
-		if err != nil {
-			warn("Error encountered while shutting down: %v", err)
-		}
-		server.confirmShutdown <- true
-		return
-	}()
+	}(server.GetServiceName())
 
 	return
 }
 
 // Build a wrapped server instance
-func (sec *NanoBuilder) BuildServer(handler func(net.Listener, *NanoBuilder, <-chan bool)) (*NanoServer, error) {
+func (sec *NanoBuilder) BuildServer(handler func(net.Listener, *NanoBuilder)) (*NanoServer, error) {
 	if sec.websocketFlag {
 		return sec.buildWebsocketServer()
 	}
@@ -196,7 +178,6 @@ func (sec NanoBuilder) WrapConnection(connection interface{}) (nan0 NanoServiceW
 			writerShutdown: make(chan bool, 1),
 			readerShutdown: make(chan bool, 1),
 			closeComplete:  make(chan bool, 2),
-			mutex: &sync.Mutex{},
 		}
 	case *websocket.Conn:
 		nan0 = &WsNan0{
@@ -208,13 +189,11 @@ func (sec NanoBuilder) WrapConnection(connection interface{}) (nan0 NanoServiceW
 			writerShutdown: make(chan bool, 1),
 			readerShutdown: make(chan bool, 1),
 			closeComplete:  make(chan bool, 2),
-			mutex: &sync.Mutex{},
 		}
 	}
 
 	go nan0.startServiceReceiver(sec.messageIdentMap)
 	go nan0.startServiceSender(sec.inverseIdentMap, sec.writeDeadlineActive)
-	time.Sleep(10 * time.Microsecond)
 
 	return nan0, err
 }

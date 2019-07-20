@@ -36,14 +36,14 @@ type Nan0 struct {
 	// Channel governing the shutdown completion
 	closeComplete chan bool
 
-	mutex *sync.Mutex
+	rxTxWaitGroup sync.WaitGroup
+
 }
 
 // Start the active receiver for this Nan0 connection. This enables the 'receiver' channel,
 // constantly reads from the open connection and places the received message on receiver channel
 func (n Nan0) startServiceReceiver(identMap map[int]proto.Message) {
 	defer recoverPanic(func(e error) {
-		n.Close()
 		fail("Connection to %v receiver service error occurred: %v", n.GetServiceName(), e)
 	})()
 	defer func() {
@@ -81,7 +81,6 @@ func (n Nan0) startServiceReceiver(identMap map[int]proto.Message) {
 // protocol buffer messages to the server
 func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActive bool) {
 	defer recoverPanic(func(e error) {
-		n.Close()
 		fail("Connection to %v sender service error occurred: %v", n.GetServiceName(), e)
 	})()
 	defer func() {
@@ -89,7 +88,7 @@ func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActi
 		debug("Shutting down service sender for %v", n.ServiceName)
 	}()
 	if n.conn != nil && !n.closed {
-		for ; ; {
+		for ; !n.IsClosed() ; {
 			select {
 			case <-n.writerShutdown:
 				return
@@ -113,6 +112,8 @@ func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActi
 
 // Closes the open connection and terminates the goroutines associated with reading them
 func (n *Nan0) Close() {
+	n.rxTxWaitGroup.Add(1)
+	defer n.rxTxWaitGroup.Done()
 	defer recoverPanic(func(e error) {
 		fail("Failed to close %s due to %v", n.ServiceName, e)
 	})
@@ -129,27 +130,27 @@ func (n *Nan0) Close() {
 	_ = n.conn.Close()
 	debug("Dialed connection for server %v closed after shutdown signal received", n.ServiceName)
 	// after goroutines are closed, close the read/write channels
-	n.mutex.Lock()
+	close(n.receiver)
+	close(n.sender)
 	n.closed = true
-	n.mutex.Unlock()
 	warn("Connection to %v is shut down!", n.ServiceName)
 }
 
 // Determine if this connection is closed
 func (n Nan0) IsClosed() bool {
-	n.mutex.Lock()
-	close := n.closed
-	n.mutex.Unlock()
-	return close
+	return n.closed
 }
 
 // Return a write-only channel that is used to send a protocol buffer message through this connection
 func (n Nan0) GetSender() chan<- interface{} {
+	n.rxTxWaitGroup.Wait()
 	return n.sender
 }
 
+
 // Returns a read-only channel that is used to receive a protocol buffer message returned through this connection
 func (n Nan0) GetReceiver() <-chan interface{} {
+	n.rxTxWaitGroup.Wait()
 	return n.receiver
 }
 

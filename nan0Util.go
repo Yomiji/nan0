@@ -13,7 +13,6 @@ import (
 	"os"
 	"reflect"
 	"runtime"
-	"sync"
 	"time"
 )
 
@@ -359,7 +358,7 @@ func getMessageFromConnectionWs(conn *websocket.Conn, identMap map[int]proto.Mes
 	var buffer []byte
 	t,buffer,err := conn.ReadMessage()
 	if t != websocket.BinaryMessage {
-		err = errors.New("non binary data read from websocket")
+		return nil, nil
 	}
 	checkError(err)
 
@@ -444,7 +443,7 @@ func readSize(reader io.Reader) int {
 }
 
 // Builds a wrapped server instance that will provide a channel of wrapped connections
-func buildServer(nsb *NanoBuilder, customHandler func(net.Listener, *NanoBuilder, <-chan bool)) (server *NanoServer, err error) {
+func buildServer(nsb *NanoBuilder, customHandler func(net.Listener, *NanoBuilder)) (server *NanoServer, err error) {
 	defer recoverPanic(func(e error) {
 		fail("Error occurred while serving %v: %v", server.service.ServiceName, e)
 		err = e
@@ -453,38 +452,25 @@ func buildServer(nsb *NanoBuilder, customHandler func(net.Listener, *NanoBuilder
 	server = &NanoServer{
 		newConnections:   make(chan NanoServiceWrapper, MaxNanoCache),
 		connections:      make([]NanoServiceWrapper, MaxNanoCache),
-		listenerShutdown: make(chan bool),
-		confirmShutdown:  make(chan bool),
 		closed:           false,
 		service:          nsb.ns,
-		mutex: &sync.Mutex{},
 	}
 	// start a listener
 	listener, err := nsb.ns.Start()
+	server.listener = listener
 	checkError(err)
 	if customHandler != nil {
-		go customHandler(listener, nsb, server.listenerShutdown)
+		go customHandler(listener, nsb)
 		return
 	}
 	// handle shutdown separate from checking for clients
-	go func() {
-		// check to see if we need to shut everything down
-		<-server.listenerShutdown // close all current connections
-		server.ResetConnections()
-		err := listener.Close()
-		if err != nil {
-			warn("Error encountered while shutting down: %v", err)
-		}
-		server.confirmShutdown <- true
-		return
-	}()
-	go func() {
-		for !server.IsShutdown() {
+	go func(listener net.Listener) {
+		for ;;{
 			// every time we get a new client
 			conn, err := listener.Accept()
 			if err != nil {
-				fail("Listener for %v no longer accepting connections.", server.service.ServiceName)
-				server.Shutdown()
+				warn("Listener for %v no longer accepting connections.", server.service.ServiceName)
+				return
 			}
 
 			// create a new nan0 connection to the client
@@ -496,8 +482,7 @@ func buildServer(nsb *NanoBuilder, customHandler func(net.Listener, *NanoBuilder
 			// place the new connection on the channel and in the connections cache
 			server.AddConnection(newNano)
 		}
-		warn("***** Server %v is shutdown *****", server.GetServiceName())
-	}()
+	}(listener)
 	info("Server %v started!", server.GetServiceName())
 	return
 }

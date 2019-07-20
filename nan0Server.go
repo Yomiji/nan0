@@ -1,6 +1,10 @@
 package nan0
 
-import "sync"
+import (
+	"net"
+	"net/http"
+	"sync"
+)
 
 // The NanoServer structure is a wrapper around a service which allows
 // for the acceptance of connections which are wrapped automatically
@@ -15,12 +19,9 @@ type NanoServer struct {
 	connections []NanoServiceWrapper
 	// The closed status
 	closed bool
-	// Listener shutdown
-	listenerShutdown chan bool
-	// Shutdown confirmation
-	confirmShutdown chan bool
-
-	mutex *sync.Mutex
+  listener net.Listener
+	wsServer *http.Server
+	mutex sync.Mutex
 }
 
 // Exposes the service delegate's serviceName property
@@ -50,35 +51,53 @@ func (server NanoServer) GetPort() int32 {
 
 // Exposes the IsExpired method of the service delegate
 func (server NanoServer) IsExpired() bool {
+	if server.IsShutdown() {
+		return true
+	}
 	return server.service.IsExpired()
 }
 
 // Exposes the IsAlive method of the service delegate
 func (server NanoServer) IsAlive() bool {
+	if server.IsShutdown() {
+		return false
+	}
 	return server.service.IsAlive()
 }
 
 // Get the channel which is fed new connections to the server
 func (server *NanoServer) GetConnections() <-chan NanoServiceWrapper {
+	if server.IsShutdown() {
+		return nil
+	}
 	return server.newConnections
 }
 
 // Get all connections that this service has ever opened
 func (server *NanoServer) GetAllConnections() []NanoServiceWrapper {
+	if server.IsShutdown() {
+		return nil
+	}
 	return server.connections
 }
 
 // Puts a connection in the server
 func (server *NanoServer) AddConnection(conn NanoServiceWrapper) {
+	if server.IsShutdown() {
+		return
+	}
 	server.connections = append(server.connections, conn)
 	server.newConnections <- conn
 }
 
 // Close all opened connections and clear connection cache
 func (server *NanoServer) ResetConnections() (total int) {
+	if server.IsShutdown() {
+		return 0
+	}
 	total = len(server.connections)
 	for _,conn := range server.connections {
-		if conn != nil {
+		if conn != nil  && !conn.IsClosed() {
 			conn.Close()
 		}
 	}
@@ -86,26 +105,27 @@ func (server *NanoServer) ResetConnections() (total int) {
 	return
 }
 
-func (server NanoServer) IsShutdown() bool {
+func (server *NanoServer) IsShutdown() bool {
 	server.mutex.Lock()
-	closed := server.closed
-	server.mutex.Unlock()
-	return closed
+	defer	server.mutex.Unlock()
+	c := server.closed
+	return c
 }
-
-// Shut down the server
 func (server *NanoServer) Shutdown() {
-	if server.IsShutdown() {
-		debug("Service already closed when calling Shutdown() on %v", server.service.ServiceName)
-		return
+	recoverPanic(func(e error) {
+		fail("In shutdown of server, %s: %v",server.GetServiceName(), e)
+	})
+	server.ResetConnections()
+
+	if server.listener != nil {
+		err := server.listener.Close()
+		checkError(err)
+	}
+	if server.wsServer != nil {
+		err := server.wsServer.Close()
+		checkError(err)
 	}
 	server.mutex.Lock()
 	server.closed = true
 	server.mutex.Unlock()
-
-	debug("Shutting down server %v", server.service.ServiceName)
-
-	// stop the listener and goroutine
-	server.listenerShutdown <- true
-	<-server.confirmShutdown
 }
