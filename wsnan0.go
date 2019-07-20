@@ -25,13 +25,11 @@ type WsNan0 struct {
 	// Channel governing the shutdown completion
 	closeComplete chan bool
 
-	rxHeartbeat chan bool
-	txHeartbeat chan bool
+	rxTxWaitGroup sync.WaitGroup
 
 	// A connection maintained by this object
 	conn *websocket.Conn
 
-	mutex sync.Mutex
 }
 
 // Start the active sender for this Nan0 connection. This enables the 'sender' channel and allows the user to send
@@ -69,6 +67,8 @@ func (n WsNan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsAct
 
 // Closes the open connection and terminates the goroutines associated with reading them
 func (n WsNan0) Close() {
+	n.rxTxWaitGroup.Add(1)
+	defer n.rxTxWaitGroup.Done()
 	if n.IsClosed() {
 		return
 	}
@@ -83,36 +83,27 @@ func (n WsNan0) Close() {
 	debug("Writer stream for Nan0 server '%v' shutdown signal sent", n.ServiceName)
 	<-n.closeComplete
 	<-n.closeComplete
-	n.mutex.Lock()
 	_ = n.conn.Close()
 	debug("Dialed connection for server %v closed after shutdown signal received", n.ServiceName)
 	// after goroutines are closed, close the read/write channels
-	defer n.mutex.Unlock()
 	n.closed = true
 	warn("Connection to %v is shut down!", n.ServiceName)
 }
 
 // Determine if this connection is closed
 func (n WsNan0) IsClosed() bool {
-	n.mutex.Lock()
-	defer	n.mutex.Unlock()
-	c := n.closed
-	return c
+	return n.closed
 }
 
 // Return a write-only channel that is used to send a protocol buffer message through this connection
 func (n WsNan0) GetSender() chan<- interface{} {
-	if n.IsClosed() {
-		return nil
-	}
+	n.rxTxWaitGroup.Wait()
 	return n.sender
 }
 
 // Returns a read-only channel that is used to receive a protocol buffer message returned through this connection
 func (n WsNan0) GetReceiver() <-chan interface{} {
-	if n.IsClosed() {
-		return nil
-	}
+	n.rxTxWaitGroup.Wait()
 	return n.receiver
 }
 

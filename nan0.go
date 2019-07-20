@@ -143,6 +143,7 @@ func (n Nan0) IsClosed() bool {
 
 // Return a write-only channel that is used to send a protocol buffer message through this connection
 func (n Nan0) GetSender() chan<- interface{} {
+	// wait on the close to complete before returning the sender
 	n.rxTxWaitGroup.Wait()
 	return n.sender
 }
@@ -150,6 +151,7 @@ func (n Nan0) GetSender() chan<- interface{} {
 
 // Returns a read-only channel that is used to receive a protocol buffer message returned through this connection
 func (n Nan0) GetReceiver() <-chan interface{} {
+	// wait on the close to complete before returning the receiver
 	n.rxTxWaitGroup.Wait()
 	return n.receiver
 }
