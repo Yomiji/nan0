@@ -21,7 +21,7 @@ type NanoServer struct {
 	closed bool
   listener net.Listener
 	wsServer *http.Server
-	mutex sync.Mutex
+	rxTxWaitGroup sync.WaitGroup
 }
 
 // Exposes the service delegate's serviceName property
@@ -51,6 +51,7 @@ func (server NanoServer) GetPort() int32 {
 
 // Exposes the IsExpired method of the service delegate
 func (server NanoServer) IsExpired() bool {
+	server.rxTxWaitGroup.Wait()
 	if server.IsShutdown() {
 		return true
 	}
@@ -59,6 +60,7 @@ func (server NanoServer) IsExpired() bool {
 
 // Exposes the IsAlive method of the service delegate
 func (server NanoServer) IsAlive() bool {
+	server.rxTxWaitGroup.Wait()
 	if server.IsShutdown() {
 		return false
 	}
@@ -67,6 +69,7 @@ func (server NanoServer) IsAlive() bool {
 
 // Get the channel which is fed new connections to the server
 func (server *NanoServer) GetConnections() <-chan NanoServiceWrapper {
+	server.rxTxWaitGroup.Wait()
 	if server.IsShutdown() {
 		return nil
 	}
@@ -75,6 +78,7 @@ func (server *NanoServer) GetConnections() <-chan NanoServiceWrapper {
 
 // Get all connections that this service has ever opened
 func (server *NanoServer) GetAllConnections() []NanoServiceWrapper {
+	server.rxTxWaitGroup.Wait()
 	if server.IsShutdown() {
 		return nil
 	}
@@ -83,6 +87,7 @@ func (server *NanoServer) GetAllConnections() []NanoServiceWrapper {
 
 // Puts a connection in the server
 func (server *NanoServer) AddConnection(conn NanoServiceWrapper) {
+	server.rxTxWaitGroup.Wait()
 	if server.IsShutdown() {
 		return
 	}
@@ -91,10 +96,7 @@ func (server *NanoServer) AddConnection(conn NanoServiceWrapper) {
 }
 
 // Close all opened connections and clear connection cache
-func (server *NanoServer) ResetConnections() (total int) {
-	if server.IsShutdown() {
-		return 0
-	}
+func (server *NanoServer) resetConnections() (total int) {
 	total = len(server.connections)
 	for _,conn := range server.connections {
 		if conn != nil  && !conn.IsClosed() {
@@ -106,16 +108,16 @@ func (server *NanoServer) ResetConnections() (total int) {
 }
 
 func (server *NanoServer) IsShutdown() bool {
-	server.mutex.Lock()
-	defer	server.mutex.Unlock()
-	c := server.closed
-	return c
+	return server.closed
 }
+
 func (server *NanoServer) Shutdown() {
+	server.rxTxWaitGroup.Add(1)
+	defer server.rxTxWaitGroup.Done()
 	recoverPanic(func(e error) {
 		fail("In shutdown of server, %s: %v",server.GetServiceName(), e)
 	})
-	server.ResetConnections()
+	server.resetConnections()
 
 	if server.listener != nil {
 		err := server.listener.Close()
@@ -125,7 +127,5 @@ func (server *NanoServer) Shutdown() {
 		err := server.wsServer.Close()
 		checkError(err)
 	}
-	server.mutex.Lock()
 	server.closed = true
-	server.mutex.Unlock()
 }
