@@ -2,7 +2,7 @@ package nan0
 
 import (
 	"github.com/golang/protobuf/proto"
-	"github.com/gorilla/websocket"
+	"github.com/Yomiji/websocket"
 	"net"
 	"net/http"
 	"net/url"

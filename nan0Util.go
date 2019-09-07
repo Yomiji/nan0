@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/golang/protobuf/proto"
-	"github.com/gorilla/websocket"
+	"github.com/Yomiji/websocket"
 	"hash/fnv"
 	"io"
 	"log"
