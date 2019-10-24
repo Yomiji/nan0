@@ -161,11 +161,10 @@ func (sec *NanoBuilder) buildWebsocketServer() (server *NanoServer, err error) {
 
 	handler := &handler{
 		handleFunc: func(w http.ResponseWriter, r *http.Request) {
-			// if any origins, check them, else add a localhost only check
-			if len(sec.origins) > 0 {
-
-			} else {
-
+			//check origin
+			if !upgrader.CheckOrigin(r) {
+				fail("Connection failed due to origin not accepted: %s", r.Host)
+				return
 			}
 			conn, err := upgrader.Upgrade(w, r, nil)
 			if err != nil {
