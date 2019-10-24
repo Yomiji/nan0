@@ -16,7 +16,8 @@ type NanoBuilder struct {
 	inverseIdentMap     map[string]int
 	sendBuffer          int
 	receiveBuffer       int
-	origin              string
+	origin				string
+	origins				[]*url.URL
 	websocketFlag       bool
 }
 
@@ -32,6 +33,22 @@ func (ns *Service) NewNanoBuilder() *NanoBuilder {
 func (sec *NanoBuilder) Websocket() *NanoBuilder {
 	sec.websocketFlag = true
 	return sec
+}
+
+// Adds origin checks to websocket handler (no use for clients)
+func(sec *NanoBuilder) AddOrigins(origin ...string) *NanoBuilder {
+	for _,v := range origin {
+		url, err := url.Parse(v)
+		if err == nil {
+			sec.origins = append(sec.origins, url)
+		}
+	}
+	return sec
+}
+
+// Adds origin checks to websocket handler (no use for clients)
+func(sec *NanoBuilder) AppendOrigins(origin ...*url.URL) {
+	sec.origins = append(sec.origins, origin...)
 }
 
 // Part of the NanoBuilder chain, sets write deadline to the TCPTimeout global value
@@ -122,9 +139,34 @@ func (sec *NanoBuilder) buildWebsocketServer() (server *NanoServer, err error) {
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
 	}
+	// create a CheckOrigin function suitable for the upgrader
+	upgrader.CheckOrigin = func(r *http.Request) bool {
+		for _,v := range sec.origins {
+			if v.Host == r.Header.Get("Host") {
+				return true
+			}
+		}
+		debug("Failed origin check for host %s", r.Header.Get("Host"))
+		return false
+	}
+
+	// construct and sanitize origins
+	if sec.origin != "" {
+		// dissect and interpret a manually set origin (for backward compat)
+		rawOrigin, err := url.Parse(sec.origin)
+		if err != nil {
+			sec.origins = append(sec.origins, rawOrigin)
+		}
+	}
 
 	handler := &handler{
 		handleFunc: func(w http.ResponseWriter, r *http.Request) {
+			// if any origins, check them, else add a localhost only check
+			if len(sec.origins) > 0 {
+
+			} else {
+
+			}
 			conn, err := upgrader.Upgrade(w, r, nil)
 			if err != nil {
 				warn("Connection dropped due to %v", err)
