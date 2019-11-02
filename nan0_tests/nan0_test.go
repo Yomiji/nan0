@@ -6,6 +6,7 @@ import (
 	"github.com/golang/protobuf/ptypes/any"
 	"io"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -199,7 +200,8 @@ func TestWebsocketClient(t *testing.T) {
 	var err error
 	wsBuilder := ns.NewNanoBuilder().
 		Websocket().
-		AddMessageIdentity(proto.Clone(new(nan0.Service)))
+		AddMessageIdentity(proto.Clone(new(nan0.Service))).
+		AddOrigins("localhost:"+strconv.Itoa(int(wsDefaultPort)))
 	wsServer, _ = wsBuilder.BuildServer(nil)
 
 	defer wsServer.Shutdown()
