@@ -1,5 +1,7 @@
 syntax = "proto3";
 package nan0;
+option java_package = "com.kodesport.jnan0.proto";
+option java_outer_classname = "jnan0";
 option go_package = "nan0";
 
 message Service {

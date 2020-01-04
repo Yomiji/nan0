@@ -404,6 +404,7 @@ func makeSendChannelFromBuilder(sec NanoBuilder) (buf chan interface{}) {
 	}
 	return
 }
+
 func makeReceiveChannelFromBuilder(sec NanoBuilder) (buf chan interface{}) {
 	if sec.receiveBuffer == 0 {
 		buf = make(chan interface{})
