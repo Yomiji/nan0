@@ -1,12 +1,12 @@
 package nan0
 
 import (
-	"github.com/golang/protobuf/proto"
-	"github.com/Yomiji/websocket"
 	"net"
 	"net/http"
 	"net/url"
-	"reflect"
+
+	"github.com/Yomiji/websocket"
+	"github.com/golang/protobuf/proto"
 )
 
 type NanoBuilder struct {
@@ -71,8 +71,10 @@ func (sec *NanoBuilder) AddMessageIdentities(messageIdents ...proto.Message) *Na
 // All protocol buffers you intend to send or receive should be registered with this method
 // or the transmissions will fail
 func (sec *NanoBuilder) AddMessageIdentity(messageIdent proto.Message) *NanoBuilder {
-	t := reflect.TypeOf(messageIdent).String()
+	t := proto.MessageName(messageIdent)
 	i := int(hashString(t))
+	info("Identity: %s, Hash: %d", t, i)
+	info("Ident bytes: %v", SizeWriter(i))
 	sec.messageIdentMap[i] = messageIdent
 	sec.inverseIdentMap[t] = i
 	return sec

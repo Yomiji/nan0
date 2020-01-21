@@ -4,16 +4,16 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/golang/protobuf/proto"
-	"github.com/Yomiji/websocket"
 	"hash/fnv"
 	"io"
 	"log"
 	"net"
 	"os"
-	"reflect"
 	"runtime"
 	"time"
+
+	"github.com/Yomiji/websocket"
+	"github.com/golang/protobuf/proto"
 )
 
 /*************
@@ -208,7 +208,7 @@ func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[stri
 	})()
 
 	// figure out if the type of the message is in our list
-	typeString := reflect.TypeOf(pb).String()
+	typeString := proto.MessageName(pb)
 	typeVal, ok := inverseMap[typeString]
 	if !ok {
 		checkError(errors.New("type value for message not present"))
@@ -252,7 +252,7 @@ func putMessageInConnectionWs(conn *websocket.Conn, pb proto.Message, inverseMap
 	})()
 
 	// figure out if the type of the message is in our list
-	typeString := reflect.TypeOf(pb).String()
+	typeString := proto.MessageName(pb)
 	typeVal, ok := inverseMap[typeString]
 	if !ok {
 		checkError(errors.New("type value for message not present"))
@@ -353,7 +353,6 @@ func getMessageFromConnectionWs(conn *websocket.Conn, identMap map[int]proto.Mes
 		msg = nil
 		err = e
 	})()
-	debug("call get message")
 	// get total message all at once
 	var buffer []byte
 	t,buffer,err := conn.ReadMessage()
