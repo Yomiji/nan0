@@ -1,7 +1,7 @@
 package nan0_tests
 
 import (
-	"github.com/Yomiji/nan0"
+	"github.com/yomiji/nan0"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes/any"
 	"io"

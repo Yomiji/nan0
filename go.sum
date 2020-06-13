@@ -1,0 +1,10 @@
+github.com/Yomiji/slog v1.1.2 h1:CzCtbWm0Z4IkI/EtQUg0oEEBun5XED9MkgQbCnk7Rco=
+github.com/Yomiji/slog v1.1.2/go.mod h1:cg3S6ztF9j6/ReN8tdhoPw7iXt6QY5L80tHVIyTxEm4=
+github.com/golang/protobuf v1.3.2 h1:6nsPYzhq5kReh6QImI3k5qWzO4PEbvbIW2cwSfR/6xs=
+github.com/golang/protobuf v1.3.2/go.mod h1:6lQm79b+lXiMfvg/cZm0SGofjICqVBUtrP5yJMmIC1U=
+github.com/gorilla/websocket v1.4.1 h1:q7AeDBpnBk8AogcD4DSag/Ukw/KV+YhzLj2bP5HvKCM=
+github.com/gorilla/websocket v1.4.1/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
+github.com/gorilla/websocket v1.4.2 h1:+/TMaTYc4QFitKJxsQ7Yye35DkWvkdLcvGKqM+x0Ufc=
+github.com/gorilla/websocket v1.4.2/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
+github.com/yomiji/slog v1.1.2 h1:6Fis1VifL9cLiAVs4zbt3BgoT6woiNQFskppLhr4sDE=
+github.com/yomiji/slog v1.1.2/go.mod h1:kcJtTu2xvK63uK5sCXwH/ihInnuHpVsrKlY6+TgpefY=

@@ -1,120 +1,20 @@
 package nan0
 
 import (
+	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
-	"log"
 	"net"
-	"os"
-	"runtime"
 	"time"
 
-	"github.com/Yomiji/websocket"
 	"github.com/golang/protobuf/proto"
+	"github.com/yomiji/slog"
+	"github.com/yomiji/websocket"
 )
 
-/*************
-	Logging
-************/
-
-//Loggers provided:
-//  Level | Output | Format
-// 	Info: Standard Output - 'Nan0 [INFO] %date% %time%'
-// 	Warn: Standard Error - 'Nan0 [DEBUG] %date% %time%'
-// 	Error: Standard Error - 'Nan0 [ERROR] %date% %time%'
-// 	Debug: Disabled by default
-var (
-	Info              = log.New(os.Stdout, "Nan0 [INFO]: ", log.Ldate|log.Ltime)
-	Warn              = log.New(os.Stderr, "Nan0 [WARN]: ", log.Ldate|log.Ltime)
-	Error             = log.New(os.Stderr, "Nan0 [ERROR]: ", log.Ldate|log.Ltime)
-	Debug *log.Logger = nil
-)
-//Toggle line numbers for output messages
-var infoLine = false
-var warnLine = false
-var failLine = false
-var debugLine = false
-
-func ToggleLineNumberPrinting(info, warn, fail, debug bool) {
-	infoLine = info
-	warnLine = warn
-	failLine = fail
-	debugLine = debug
-}
-
-// Wrapper around the Info global log that allows for this api to log to that level correctly
-func info(msg string, vars ...interface{}) {
-	if Info != nil {
-		var formattedMsg = msg
-		if infoLine {
-			_, fn, line, _ := runtime.Caller(2)
-			formattedMsg = fmt.Sprintf("%s:%d %s", fn, line, msg)
-		}
-		Info.Printf(formattedMsg, vars...)
-	}
-}
-
-// Wrapper around the Warn global log that allows for this api to log to that level correctly
-func warn(msg string, vars ...interface{}) {
-	if Warn != nil {
-		var formattedMsg = msg
-		if warnLine {
-			_, fn, line, _ := runtime.Caller(2)
-			formattedMsg = fmt.Sprintf("%s:%d %s", fn, line, msg)
-		}
-		Warn.Printf(formattedMsg, vars...)
-	}
-}
-
-// Wrapper around the Error global log that allows for this api to log to that level correctly
-func fail(msg string, vars ...interface{}) {
-	if Error != nil {
-		var formattedMsg = msg
-		if failLine {
-			_, fn, line, _ := runtime.Caller(2)
-			formattedMsg = fmt.Sprintf("%s:%d %s", fn, line, msg)
-		}
-		Error.Printf(formattedMsg, vars...)
-	}
-}
-
-// Wrapper around the Debug global log that allows for this api to log to that level correctly
-func debug(msg string, vars ...interface{}) {
-	if Debug != nil {
-		var formattedMsg = msg
-		if debugLine {
-			_, fn, line, _ := runtime.Caller(2)
-			formattedMsg = fmt.Sprintf("%s:%d %s", fn, line, msg)
-		}
-		Debug.Printf(formattedMsg, vars...)
-	}
-}
-
-// Conveniently disable all logging for this api
-func NoLogging() {
-	Info = nil
-	Warn = nil
-	Error = nil
-	Debug = nil
-}
-
-func SetLogWriter(w io.Writer) {
-	if Info != nil {
-		Info = log.New(w, "Nan0 [INFO]: ", log.Ldate|log.Ltime)
-	}
-	if Warn != nil {
-		Warn = log.New(w, "Nan0 [WARN]: ", log.Ldate|log.Ltime)
-	}
-	if Error != nil {
-		Error = log.New(w, "Nan0 [ERROR]: ", log.Ldate|log.Ltime)
-	}
-	if Debug != nil {
-		Debug = log.New(w, "Nan0 [DEBUG]: ", log.Ldate|log.Ltime)
-	}
-}
 
 /*******************
 	Service Params
@@ -203,7 +103,7 @@ func recoverPanic(errfunc func(error)) func() {
 // 	4. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
 func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[string]int) (err error) {
 	defer recoverPanic(func(e error) {
-		debug("Message failed to send: %v due to %v", pb, e)
+		slog.Debug("Message failed to send: %v due to %v", pb, e)
 		err = e
 	})()
 
@@ -225,17 +125,17 @@ func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[stri
 	bigBytes = append(bigBytes, v...)
 
 	// write the preamble, sizes and message
-	debug("Writing to connection")
+	slog.Debug("Writing to connection")
 	n, err := conn.Write(bigBytes)
 	checkError(err)
 
 	// check the full buffer was written
 	totalSize := len(bigBytes)
 	if totalSize != n {
-		debug("discrepancy in number of bytes written for message. expected: %v, got: %v", totalSize, n)
+		slog.Debug("discrepancy in number of bytes written for message. expected: %v, got: %v", totalSize, n)
 		err = errors.New("message size discrepancy while sending")
 	} else {
-		debug("wrote message to connection with byte size: %v", len(ProtoPreamble)+SizeArrayWidth+n)
+		slog.Debug("wrote message to connection with byte size: %v", len(ProtoPreamble)+SizeArrayWidth+n)
 	}
 	return err
 }
@@ -247,7 +147,7 @@ func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[stri
 // 	4. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
 func putMessageInConnectionWs(conn *websocket.Conn, pb proto.Message, inverseMap map[string]int) (err error) {
 	defer recoverPanic(func(e error) {
-		debug("Message failed to send: %v due to %v", pb, e)
+		slog.Debug("Message failed to send: %v due to %v", pb, e)
 		err = e
 	})()
 
@@ -269,7 +169,7 @@ func putMessageInConnectionWs(conn *websocket.Conn, pb proto.Message, inverseMap
 	bigBytes = append(bigBytes, v...)
 
 	// write the preamble, sizes and message
-	debug("Writing to connection")
+	slog.Debug("Writing to connection")
 	err = conn.WriteMessage(websocket.BinaryMessage, bigBytes)
 	checkError(err)
 
@@ -285,7 +185,7 @@ func putMessageInConnectionWs(conn *websocket.Conn, pb proto.Message, inverseMap
 // 	4. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
 func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message) (msg proto.Message, err error) {
 	defer recoverPanic(func(e error) {
-		debug("Failed to receive message due to %v", e)
+		slog.Debug("Failed to receive message due to %v", e)
 		msg = nil
 		err = e
 	})()
@@ -307,7 +207,7 @@ func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message) (ms
 	// get the protobuf bytes from the reader
 	count, err := conn.Read(v)
 	checkError(err)
-	debug("Read data %v", v)
+	slog.Debug("Read data %v", v)
 
 	// check the number of bytes received matches the bytes expected
 	if count != size {
@@ -324,7 +224,7 @@ func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message) (ms
 // Checks the preamble bytes to determine if the expected matches
 func isPreambleValid(reader io.Reader) (err error) {
 	defer recoverPanic(func(e error) {
-		debug("preamble issue: %v", e)
+		slog.Debug("preamble issue: %v", e)
 		err = e
 	})()
 	b := make([]byte, len(ProtoPreamble))
@@ -333,7 +233,7 @@ func isPreambleValid(reader io.Reader) (err error) {
 		return io.EOF
 	}
 	checkError(err)
-	debug("checking %v against preamble %v", b, ProtoPreamble)
+	slog.Debug("checking %v against preamble %v", b, ProtoPreamble)
 	for i,v := range b {
 		if i < len(ProtoPreamble) && v != ProtoPreamble[i] {
 			return errors.New("preamble invalid")
@@ -349,7 +249,7 @@ func isPreambleValid(reader io.Reader) (err error) {
 // 	4. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
 func getMessageFromConnectionWs(conn *websocket.Conn, identMap map[int]proto.Message) (msg proto.Message, err error) {
 	defer recoverPanic(func(e error) {
-		debug("Failed to receive message due to %v", e)
+		slog.Debug("Failed to receive message due to %v", e)
 		msg = nil
 		err = e
 	})()
@@ -416,11 +316,11 @@ func makeReceiveChannelFromBuilder(sec NanoBuilder) (buf chan interface{}) {
 // Checks the preamble bytes to determine if the expected matches
 func isPreambleValidWs(readBytes []byte) (err error) {
 	defer recoverPanic(func(e error) {
-		debug("preamble issue: %v", e)
+		slog.Debug("preamble issue: %v", e)
 		err = e
 	})()
 
-	debug("checking %v against preamble %v", readBytes, ProtoPreamble)
+	slog.Debug("checking %v against preamble %v", readBytes, ProtoPreamble)
 	for i, v := range readBytes {
 		if i < len(ProtoPreamble) && v != ProtoPreamble[i] {
 			return errors.New("preamble invalid")
@@ -432,11 +332,11 @@ func isPreambleValidWs(readBytes []byte) (err error) {
 // Grabs the next two bytes from the reader and figure out the size of the following protobuf message
 func readSize(reader io.Reader) int {
 	defer recoverPanic(func(e error) {
-		warn("issue reading size: %v", e)
+		slog.Warn("issue reading size: %v", e)
 	})()
 	bytes := make([]byte, SizeArrayWidth)
 	_, err := reader.Read(bytes)
-	debug("read size array %v", bytes)
+	slog.Debug("read size array %v", bytes)
 	checkError(err)
 
 	return SizeReader(bytes)
@@ -445,7 +345,7 @@ func readSize(reader io.Reader) int {
 // Builds a wrapped server instance that will provide a channel of wrapped connections
 func buildServer(nsb *NanoBuilder, customHandler func(net.Listener, *NanoBuilder)) (server *NanoServer, err error) {
 	defer recoverPanic(func(e error) {
-		fail("Error occurred while serving %v: %v", server.service.ServiceName, e)
+		slog.Fail("Error occurred while serving %v: %v", server.service.ServiceName, e)
 		err = e
 		server = nil
 	})()
@@ -457,7 +357,19 @@ func buildServer(nsb *NanoBuilder, customHandler func(net.Listener, *NanoBuilder
 	}
 	// start a listener
 	listener, err := nsb.ns.Start()
-	server.listener = listener
+	// start secure listener instead
+	if nsb.tlsConfig != nil {
+		cer, err := tls.X509KeyPair([]byte(nsb.tlsConfig.CertFile), []byte(nsb.tlsConfig.KeyFile))
+		if err != nil {
+			slog.Fail("configuration for tls failed due to %v", err)
+		}
+		config := &tls.Config{Certificates: []tls.Certificate{cer}}
+		l := tls.NewListener(listener, config)
+		server.listener = l
+	} else {
+		// start insecure listener
+		server.listener = listener
+	}
 	checkError(err)
 	if customHandler != nil {
 		go customHandler(listener, nsb)
@@ -469,20 +381,20 @@ func buildServer(nsb *NanoBuilder, customHandler func(net.Listener, *NanoBuilder
 			// every time we get a new client
 			conn, err := listener.Accept()
 			if err != nil {
-				warn("Listener for %v no longer accepting connections.", server.service.ServiceName)
+				slog.Warn("Listener for %v no longer accepting connections.", server.service.ServiceName)
 				return
 			}
 
 			// create a new nan0 connection to the client
 			newNano, err := nsb.WrapConnection(conn)
 			if err != nil {
-				warn("Connection dropped due to %v", err)
+				slog.Warn("Connection dropped due to %v", err)
 			}
 
 			// place the new connection on the channel and in the connections cache
 			server.AddConnection(newNano)
 		}
 	}(listener)
-	info("Server %v started!", server.GetServiceName())
+	slog.Info("Server %v started!", server.GetServiceName())
 	return
 }

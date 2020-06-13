@@ -4,6 +4,8 @@ import (
 	"net"
 	"net/http"
 	"sync"
+
+	"github.com/yomiji/slog"
 )
 
 // The NanoServer structure is a wrapper around a service which allows
@@ -115,7 +117,7 @@ func (server *NanoServer) Shutdown() {
 	server.rxTxWaitGroup.Add(1)
 	defer server.rxTxWaitGroup.Done()
 	recoverPanic(func(e error) {
-		fail("In shutdown of server, %s: %v",server.GetServiceName(), e)
+		slog.Fail("In shutdown of server, %s: %v",server.GetServiceName(), e)
 	})
 	server.resetConnections()
 

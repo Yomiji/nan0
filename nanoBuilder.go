@@ -4,10 +4,17 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sync"
 
-	"github.com/Yomiji/websocket"
+	"github.com/yomiji/slog"
 	"github.com/golang/protobuf/proto"
+	"github.com/yomiji/websocket"
 )
+
+type TLSConfig struct {
+	CertFile string
+	KeyFile string
+}
 
 type NanoBuilder struct {
 	ns                  *Service
@@ -16,9 +23,10 @@ type NanoBuilder struct {
 	inverseIdentMap     map[string]int
 	sendBuffer          int
 	receiveBuffer       int
-	origin				string
-	origins				[]*url.URL
+	origin              string
+	origins             []*url.URL
 	websocketFlag       bool
+	tlsConfig           *TLSConfig
 }
 
 func (ns *Service) NewNanoBuilder() *NanoBuilder {
@@ -32,6 +40,16 @@ func (ns *Service) NewNanoBuilder() *NanoBuilder {
 // Enables websocket handling for this connection
 func (sec *NanoBuilder) Websocket() *NanoBuilder {
 	sec.websocketFlag = true
+	return sec
+}
+
+func (sec *NanoBuilder) Secure(config TLSConfig) *NanoBuilder {
+	sec.tlsConfig = &config
+	return sec
+}
+
+func (sec *NanoBuilder) Insecure() *NanoBuilder {
+	sec.tlsConfig = nil
 	return sec
 }
 
@@ -73,8 +91,8 @@ func (sec *NanoBuilder) AddMessageIdentities(messageIdents ...proto.Message) *Na
 func (sec *NanoBuilder) AddMessageIdentity(messageIdent proto.Message) *NanoBuilder {
 	t := proto.MessageName(messageIdent)
 	i := int(hashString(t))
-	info("Identity: %s, Hash: %d", t, i)
-	info("Ident bytes: %v", SizeWriter(i))
+	slog.Debug("Identity: %s, Hash: %d", t, i)
+	slog.Debug("Ident bytes: %v", SizeWriter(i))
 	sec.messageIdentMap[i] = messageIdent
 	sec.inverseIdentMap[t] = i
 	return sec
@@ -112,7 +130,7 @@ func (sec NanoBuilder) Build() (nan0 NanoServiceWrapper, err error) {
 		// otherwise, handle the connection like this using tcp
 		conn, err = net.Dial("tcp", composeTcpAddress(sec.ns.HostName, sec.ns.Port))
 		checkError(err)
-		info("Connection to %v established!", sec.ns.ServiceName)
+		slog.Info("Connection to %v established!", sec.ns.ServiceName)
 	}
 	return sec.WrapConnection(conn)
 }
@@ -126,7 +144,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (sec *NanoBuilder) buildWebsocketServer() (server *NanoServer, err error) {
 	defer recoverPanic(func(e error) {
-		fail("Error occurred while serving %v: %v", server.service.ServiceName, e)
+		slog.Fail("Error occurred while serving %v: %v", server.service.ServiceName, e)
 		err = e
 		server = nil
 	})()
@@ -148,7 +166,7 @@ func (sec *NanoBuilder) buildWebsocketServer() (server *NanoServer, err error) {
 				return true
 			}
 		}
-		debug("Failed origin check for host %s", r.Header.Get("Host"))
+		slog.Debug("Failed origin check for host %s", r.Header.Get("Host"))
 		return false
 	}
 
@@ -165,15 +183,15 @@ func (sec *NanoBuilder) buildWebsocketServer() (server *NanoServer, err error) {
 		handleFunc: func(w http.ResponseWriter, r *http.Request) {
 			//check origin
 			if !upgrader.CheckOrigin(r) {
-				fail("Connection failed due to origin not accepted: %s", r.Host)
+				slog.Fail("Connection failed due to origin not accepted: %s", r.Host)
 				return
 			}
 			conn, err := upgrader.Upgrade(w, r, nil)
 			if err != nil {
-				warn("Connection dropped due to %v", err)
+				slog.Warn("Connection dropped due to %v", err)
 				return
 			} else {
-				info("%s has connected to the server.", conn.RemoteAddr())
+				slog.Info("%s has connected to the server.", conn.RemoteAddr())
 			}
 			newNano, err := sec.WrapConnection(conn)
 			server.AddConnection(newNano)
@@ -184,11 +202,20 @@ func (sec *NanoBuilder) buildWebsocketServer() (server *NanoServer, err error) {
 	server.wsServer = srv
 	http.Handle(sec.ns.GetUri(), handler)
 	go func(serviceName string) {
-		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-			fail("Websocket server: %s", err)
+		if sec.tlsConfig != nil {
+			if err := srv.ListenAndServeTLS(sec.tlsConfig.CertFile, sec.tlsConfig.KeyFile); err != http.ErrServerClosed {
+				slog.Fail("Websocket server: %s", err)
+			} else {
+				slog.Info("Websocket server %s closed.", serviceName)
+			}
 		} else {
-			info("Websocket server %s closed.", serviceName)
+			if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+				slog.Fail("Websocket server: %s", err)
+			} else {
+				slog.Info("Websocket server %s closed.", serviceName)
+			}
 		}
+
 	}(server.GetServiceName())
 
 	return
@@ -232,6 +259,7 @@ func (sec NanoBuilder) WrapConnection(connection interface{}) (nan0 NanoServiceW
 			writerShutdown: make(chan bool, 1),
 			readerShutdown: make(chan bool, 1),
 			closeComplete:  make(chan bool, 2),
+			rxTxWaitGroup: new(sync.WaitGroup),
 		}
 	}
 
