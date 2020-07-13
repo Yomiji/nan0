@@ -89,39 +89,7 @@ transport protocols, message handshaking and so forth. Here are the primary uses
     		fmt.Println("Service was echoed back")
     	}
     }
- 
-##### Logging
-This framework has a logging package that is used to inform the consumer of the details of operation. The logging
-mechanism is remotely similar to some packages in other languages such as Java's slf4j; or at least I'd like it to be
-similar to something most people have seen before. That being said there are some functions that must be discussed, as
-the default settings may be more verbose than you need.
-
-* There are four logging levels: ***Debug***, ***Info***, ***Warn***, and ***Error***
-* All of the logging levels are enabled by default, to disable them, you must set the corresponding logger to ***nil***.
-    ```go
-      package main
-      
-      import "github.com/yomiji/nan0"
-      
-      func main() {
-        nan0.Debug = nil
-      }
-    ```
-* You can reassign the logger from console to another writer using the **SetLogWriter** function.
-    ```go
-      package main
-      
-      import (
-        "github.com/Yomiji/nan0"
-        "net"
-      )
-      
-      func main() {
-        logserv,_ := net.Dial("tcp", "localhost:1234")
-        nan0.SetLogWriter(logserv)
-      }
-    ```
-
+    
 ##### Demo Project
 There is a demo project created using the Nan0 API called [Nan0Chat](https://github.com/Yomiji/nan0chat) . This is a chat application that utilizes the
 features in Nan0 to communicate securely between a server and multiple clients.

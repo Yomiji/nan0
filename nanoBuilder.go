@@ -1,19 +1,43 @@
 package nan0
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"sync"
 
-	"github.com/yomiji/slog"
 	"github.com/golang/protobuf/proto"
+	"github.com/yomiji/slog"
 	"github.com/yomiji/websocket"
 )
 
+const (
+	CertFile TLSFile = iota
+	KeyFile
+	RootCAFile
+)
+
+type TLSFile int
+
 type TLSConfig struct {
-	CertFile string
-	KeyFile string
+	configs map[TLSFile][]byte
+}
+
+func (tcfg *TLSConfig) SetFile(fileType TLSFile, data []byte) {
+	if tcfg.configs == nil {
+		tcfg.configs = make(map[TLSFile][]byte)
+	}
+	tcfg.configs[fileType] = data
+}
+
+func (tcfg *TLSConfig) getFile(fileType TLSFile) []byte {
+	if tcfg.configs == nil {
+		return make([]byte,0)
+	}
+	return tcfg.configs[fileType]
 }
 
 type NanoBuilder struct {
@@ -43,19 +67,26 @@ func (sec *NanoBuilder) Websocket() *NanoBuilder {
 	return sec
 }
 
-func (sec *NanoBuilder) Secure(config TLSConfig) *NanoBuilder {
-	sec.tlsConfig = &config
+func (sec *NanoBuilder) SecureServer(certFile, keyFile []byte) *NanoBuilder {
+	if sec.tlsConfig == nil {
+		sec.tlsConfig = new(TLSConfig)
+	}
+	sec.tlsConfig.SetFile(CertFile, certFile)
+	sec.tlsConfig.SetFile(KeyFile, keyFile)
 	return sec
 }
 
-func (sec *NanoBuilder) Insecure() *NanoBuilder {
-	sec.tlsConfig = nil
+func (sec *NanoBuilder) SecureClient(rootCaFile []byte) *NanoBuilder {
+	if sec.tlsConfig == nil {
+		sec.tlsConfig = new(TLSConfig)
+	}
+	sec.tlsConfig.SetFile(RootCAFile, rootCaFile)
 	return sec
 }
 
 // Adds origin checks to websocket handler (no use for clients)
-func(sec *NanoBuilder) AddOrigins(origin ...string) *NanoBuilder {
-	for _,v := range origin {
+func (sec *NanoBuilder) AddOrigins(origin ...string) *NanoBuilder {
+	for _, v := range origin {
 		url, err := url.Parse(v)
 		if err == nil {
 			sec.origins = append(sec.origins, url)
@@ -65,7 +96,7 @@ func(sec *NanoBuilder) AddOrigins(origin ...string) *NanoBuilder {
 }
 
 // Adds origin checks to websocket handler (no use for clients)
-func(sec *NanoBuilder) AppendOrigins(origin ...*url.URL) {
+func (sec *NanoBuilder) AppendOrigins(origin ...*url.URL) {
 	sec.origins = append(sec.origins, origin...)
 }
 
@@ -122,14 +153,30 @@ func (sec NanoBuilder) Build() (nan0 NanoServiceWrapper, err error) {
 	// if the connection is a websocket, handle it this way
 	if sec.websocketFlag {
 		// setup a url to dial the websocket, hostname shouldn't include protocol
-		u := url.URL{Scheme:"ws",Host:composeTcpAddress(sec.ns.HostName, sec.ns.Port), Path:sec.ns.Uri}
+		u := url.URL{Scheme: "ws", Host: composeTcpAddress(sec.ns.HostName, sec.ns.Port), Path: sec.ns.Uri}
 		// call the websocket server
 		conn, _, err = websocket.DefaultDialer.Dial(u.String(), nil)
 		checkError(err)
 	} else {
-		// otherwise, handle the connection like this using tcp
-		conn, err = net.Dial("tcp", composeTcpAddress(sec.ns.HostName, sec.ns.Port))
-		checkError(err)
+		// secure conn
+		if sec.tlsConfig != nil {
+			rootFile := sec.tlsConfig.getFile(RootCAFile)
+			if len(rootFile) == 0 {
+				slog.Debug("rootFile returned blank from tlsConfig")
+				slog.Fail("missing or invalid root CA for client connection")
+			}
+			roots :=x509.NewCertPool()
+			ok := roots.AppendCertsFromPEM(rootFile)
+			if !ok {
+				log.Fatal("failed to parse root certificate")
+			}
+			config := &tls.Config{RootCAs: roots, ServerName: sec.ns.HostName}
+			conn, err = tls.Dial("tcp", composeTcpAddress(sec.ns.HostName, sec.ns.Port), config)
+		} else {
+			// otherwise, handle the connection like this using tcp
+			conn, err = net.Dial("tcp", composeTcpAddress(sec.ns.HostName, sec.ns.Port))
+			checkError(err)
+		}
 		slog.Info("Connection to %v established!", sec.ns.ServiceName)
 	}
 	return sec.WrapConnection(conn)
@@ -138,6 +185,7 @@ func (sec NanoBuilder) Build() (nan0 NanoServiceWrapper, err error) {
 type handler struct {
 	handleFunc func(w http.ResponseWriter, r *http.Request)
 }
+
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.handleFunc(w, r)
 }
@@ -149,10 +197,10 @@ func (sec *NanoBuilder) buildWebsocketServer() (server *NanoServer, err error) {
 		server = nil
 	})()
 	server = &NanoServer{
-		newConnections:   make(chan NanoServiceWrapper),
-		connections:      make([]NanoServiceWrapper, MaxNanoCache),
-		closed:           false,
-		service:          sec.ns,
+		newConnections: make(chan NanoServiceWrapper),
+		connections:    make([]NanoServiceWrapper, MaxNanoCache),
+		closed:         false,
+		service:        sec.ns,
 	}
 
 	var upgrader = websocket.Upgrader{
@@ -161,7 +209,7 @@ func (sec *NanoBuilder) buildWebsocketServer() (server *NanoServer, err error) {
 	}
 	// create a CheckOrigin function suitable for the upgrader
 	upgrader.CheckOrigin = func(r *http.Request) bool {
-		for _,v := range sec.origins {
+		for _, v := range sec.origins {
 			if v.Host == r.Header.Get("Host") {
 				return true
 			}
@@ -203,7 +251,11 @@ func (sec *NanoBuilder) buildWebsocketServer() (server *NanoServer, err error) {
 	http.Handle(sec.ns.GetUri(), handler)
 	go func(serviceName string) {
 		if sec.tlsConfig != nil {
-			if err := srv.ListenAndServeTLS(sec.tlsConfig.CertFile, sec.tlsConfig.KeyFile); err != http.ErrServerClosed {
+			if err := srv.ListenAndServeTLS(
+				string(sec.tlsConfig.getFile(CertFile)),
+				string(sec.tlsConfig.getFile(KeyFile)),
+			);
+				err != http.ErrServerClosed {
 				slog.Fail("Websocket server: %s", err)
 			} else {
 				slog.Info("Websocket server %s closed.", serviceName)
@@ -259,7 +311,7 @@ func (sec NanoBuilder) WrapConnection(connection interface{}) (nan0 NanoServiceW
 			writerShutdown: make(chan bool, 1),
 			readerShutdown: make(chan bool, 1),
 			closeComplete:  make(chan bool, 2),
-			rxTxWaitGroup: new(sync.WaitGroup),
+			rxTxWaitGroup:  new(sync.WaitGroup),
 		}
 	}
 
@@ -268,4 +320,3 @@ func (sec NanoBuilder) WrapConnection(connection interface{}) (nan0 NanoServiceW
 
 	return nan0, err
 }
-

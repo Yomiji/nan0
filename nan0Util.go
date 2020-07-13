@@ -189,7 +189,6 @@ func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message) (ms
 		msg = nil
 		err = e
 	})()
-
 	// check the preamble
 	err = isPreambleValid(conn)
 	if err == io.EOF {
@@ -359,7 +358,10 @@ func buildServer(nsb *NanoBuilder, customHandler func(net.Listener, *NanoBuilder
 	listener, err := nsb.ns.Start()
 	// start secure listener instead
 	if nsb.tlsConfig != nil {
-		cer, err := tls.X509KeyPair([]byte(nsb.tlsConfig.CertFile), []byte(nsb.tlsConfig.KeyFile))
+		cer, err := tls.X509KeyPair(
+			nsb.tlsConfig.getFile(CertFile),
+			nsb.tlsConfig.getFile(KeyFile),
+		)
 		if err != nil {
 			slog.Fail("configuration for tls failed due to %v", err)
 		}

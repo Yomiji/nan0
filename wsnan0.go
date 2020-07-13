@@ -4,8 +4,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yomiji/slog"
 	"github.com/golang/protobuf/proto"
+	"github.com/yomiji/slog"
 	"github.com/yomiji/websocket"
 )
 // The WsNan0 structure is a wrapper around a websocket connection which sends

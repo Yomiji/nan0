@@ -1,19 +1,20 @@
 package nan0_tests
 
 import (
-	"github.com/yomiji/nan0"
-	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes/any"
 	"io"
 	"os"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/golang/protobuf/proto"
+	"github.com/golang/protobuf/ptypes/any"
+	"github.com/yomiji/nan0"
+	"github.com/yomiji/slog"
 )
 
 var nsDefaultPort int32 = 2324
 var wsDefaultPort int32 = 8080
-
 
 var wsServer nan0.Server
 
@@ -30,8 +31,8 @@ func startTestServerThread(wsServer nan0.Server) {
 }
 
 func TestMain(m *testing.M) {
-	//nan0.Debug = log.New(os.Stdout, "Nan0 [DEBUG]: ", log.Ldate|log.Ltime)
-	//nan0.ToggleLineNumberPrinting(true, true, true, true)
+	slog.ToggleLogging(true, true,true,true)
+	slog.ToggleLineNumberPrinting(true, true, true, true)
 
 	os.Exit(m.Run())
 }
@@ -55,7 +56,9 @@ func TestNan0_Close(t *testing.T) {
 		AddMessageIdentity(serviceMsg).
 		ToggleWriteDeadline(false).
 		Build()
-
+	if err != nil {
+		t.Fatalf("\t\tTest Failed, err when building client: %v", err)
+	}
 	if n.IsClosed() == true {
 		t.Fatal(" \t\tTest Failed, n.closed == true failed")
 	}
@@ -142,6 +145,38 @@ func TestNan0_FailWithWrongType(t *testing.T) {
 	}
 }
 
+func TestNan0_SecureTCP(t *testing.T) {
+	ns := &nan0.Service{
+		ServiceName: "TestService",
+		Port:        nsDefaultPort,
+		HostName:    "localhost",
+		ServiceType: "Test",
+		StartTime:   time.Now().Unix(),
+	}
+	builder := ns.NewNanoBuilder().
+		AddMessageIdentities(proto.Clone(new(nan0.Service))).
+		ToggleWriteDeadline(true)
+	server, err := builder.Secure(nan0.TLSConfig{CertFile: []byte(serverCert), KeyFile: []byte(serverKey)}).BuildServer(nil)
+	if err != nil {
+		t.Fatalf("\t\tTest Failed, err when building service: %v", err)
+	}
+	defer server.Shutdown()
+	startTestServerThread(server)
+	client, err := builder.SecureClient([]byte(rootCert)).Build()
+	if err != nil {
+		t.Fatalf("\t\tTest Failed, err when building client: %v", err)
+	}
+	client.GetSender() <- ns
+	select {
+	case val := <-client.GetReceiver():
+		if _, ok := val.(nan0.Service); !ok {
+			t.Fatal("\t\tTest Failed, Nan0 should be nan0.Service")
+		}
+		client.Close()
+	case <-time.After(5 * time.Second):
+		t.Fatal("\t\tTest Failed, Timeout")
+	}
+}
 func TestNan0_MixedOrderMessageIdent(t *testing.T) {
 	ns := &nan0.Service{
 		ServiceName: "TestService",
