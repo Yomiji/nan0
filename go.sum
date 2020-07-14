@@ -6,5 +6,17 @@ github.com/gorilla/websocket v1.4.1 h1:q7AeDBpnBk8AogcD4DSag/Ukw/KV+YhzLj2bP5HvK
 github.com/gorilla/websocket v1.4.1/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/gorilla/websocket v1.4.2 h1:+/TMaTYc4QFitKJxsQ7Yye35DkWvkdLcvGKqM+x0Ufc=
 github.com/gorilla/websocket v1.4.2/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
+github.com/miekg/dns v1.1.3 h1:1g0r1IvskvgL8rR+AcHzUA+oFmGcQlaIm4IqakufeMM=
+github.com/miekg/dns v1.1.3/go.mod h1:W1PPwlIAgtquWBMBEV9nkV9Cazfe8ScdGz/Lj7v3Nrg=
+github.com/yomiji/mdns v0.3.1 h1:c9Vcp98HzUT6QJS/s/SFShPnCAz7uXeuIWElDX6vVds=
+github.com/yomiji/mdns v0.3.1/go.mod h1:ldmhFY9VKYhHHZyk1hTzeOFv6al/PsPPa2uG+2Q6VYE=
 github.com/yomiji/slog v1.1.2 h1:6Fis1VifL9cLiAVs4zbt3BgoT6woiNQFskppLhr4sDE=
 github.com/yomiji/slog v1.1.2/go.mod h1:kcJtTu2xvK63uK5sCXwH/ihInnuHpVsrKlY6+TgpefY=
+github.com/yomiji/websocket v1.4.3 h1:S/5Ocx89kmdXVYaqkDdI6CrWYv7YT1oJVebe72aEs3s=
+github.com/yomiji/websocket v1.4.3/go.mod h1:0CKXyNxHONRn73cN8Hzm2/I9SMbxaGIB18r98jN2ba8=
+golang.org/x/crypto v0.0.0-20190130090550-b01c7a725664 h1:YbZJ76lQ1BqNhVe7dKTSB67wDrc2VPRR75IyGyyPDX8=
+golang.org/x/crypto v0.0.0-20190130090550-b01c7a725664/go.mod h1:6SG95UA2DQfeDnfUPMdvaQW0Q7yPrPDi9nlGo2tz2b4=
+golang.org/x/net v0.0.0-20190125091013-d26f9f9a57f3 h1:ulvT7fqt0yHWzpJwI57MezWnYDVpCAYBVuYst/L+fAY=
+golang.org/x/net v0.0.0-20190125091013-d26f9f9a57f3/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
+golang.org/x/sys v0.0.0-20190129075346-302c3dd5f1cc h1:WiYx1rIFmx8c0mXAFtv5D/mHyKe1+jmuP7PViuwqwuQ=
+golang.org/x/sys v0.0.0-20190129075346-302c3dd5f1cc/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=

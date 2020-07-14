@@ -1,14 +1,15 @@
 package nan0_tests
 
 import (
-	"github.com/yomiji/nan0"
-	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes/any"
 	"io"
 	"os"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/golang/protobuf/proto"
+	"github.com/golang/protobuf/ptypes/any"
+	"github.com/yomiji/nan0"
 )
 
 var nsDefaultPort int32 = 2324

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/yomiji/mdns"
 	"github.com/yomiji/slog"
 )
 
@@ -20,10 +21,11 @@ type NanoServer struct {
 	// Connections array, which keeps connected clients
 	connections []NanoServiceWrapper
 	// The closed status
-	closed bool
-  listener net.Listener
-	wsServer *http.Server
-	rxTxWaitGroup sync.WaitGroup
+	closed        bool
+	listener      net.Listener
+	wsServer      *http.Server
+	rxTxWaitGroup *sync.WaitGroup
+	mdnsServer    *mdns.Server
 }
 
 // Exposes the service delegate's serviceName property
@@ -100,8 +102,8 @@ func (server *NanoServer) AddConnection(conn NanoServiceWrapper) {
 // Close all opened connections and clear connection cache
 func (server *NanoServer) resetConnections() (total int) {
 	total = len(server.connections)
-	for _,conn := range server.connections {
-		if conn != nil  && !conn.IsClosed() {
+	for _, conn := range server.connections {
+		if conn != nil && !conn.IsClosed() {
 			conn.Close()
 		}
 	}
@@ -117,7 +119,7 @@ func (server *NanoServer) Shutdown() {
 	server.rxTxWaitGroup.Add(1)
 	defer server.rxTxWaitGroup.Done()
 	recoverPanic(func(e error) {
-		slog.Fail("In shutdown of server, %s: %v",server.GetServiceName(), e)
+		slog.Fail("In shutdown of server, %s: %v", server.GetServiceName(), e)
 	})
 	server.resetConnections()
 
@@ -127,6 +129,10 @@ func (server *NanoServer) Shutdown() {
 	}
 	if server.wsServer != nil {
 		err := server.wsServer.Close()
+		checkError(err)
+	}
+	if server.mdnsServer != nil {
+		err := server.mdnsServer.Shutdown()
 		checkError(err)
 	}
 	server.closed = true

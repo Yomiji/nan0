@@ -153,6 +153,7 @@ func (sec *NanoBuilder) buildWebsocketServer() (server *NanoServer, err error) {
 		connections:      make([]NanoServiceWrapper, MaxNanoCache),
 		closed:           false,
 		service:          sec.ns,
+		rxTxWaitGroup:    new(sync.WaitGroup),
 	}
 
 	var upgrader = websocket.Upgrader{

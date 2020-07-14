@@ -7,9 +7,10 @@ option go_package = "nan0";
 message Service {
     bool expired = 1;
     int32 port = 2;
-    int64 startTime = 3;
-    string hostName = 4;
-    string uri = 5;
-    string serviceName = 6;
-    string serviceType = 7;
+    int32 mdnsPort = 3;
+    int64 startTime = 4;
+    string hostName = 5;
+    string uri = 6;
+    string serviceName = 7;
+    string serviceType = 8;
 }

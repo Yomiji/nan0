@@ -8,13 +8,15 @@ import (
 	"hash/fnv"
 	"io"
 	"net"
+	"reflect"
+	"sync"
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/yomiji/mdns"
 	"github.com/yomiji/slog"
 	"github.com/yomiji/websocket"
 )
-
 
 /*******************
 	Service Params
@@ -176,8 +178,6 @@ func putMessageInConnectionWs(conn *websocket.Conn, pb proto.Message, inverseMap
 	return err
 }
 
-
-
 // Retrieves the given protocol buffer message from the connection, the connection is expected to send the following:
 // 	1. The preamble bytes stored in ProtoPreamble (defaults to 7 bytes)
 //  2. The protobuf type identifier (4 bytes)
@@ -197,7 +197,7 @@ func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message) (ms
 	}
 	checkError(err)
 	// get the message type bytes
-	messageType:= readSize(conn)
+	messageType := readSize(conn)
 	msg = proto.Clone(identMap[messageType])
 
 	// get the size of the next message
@@ -220,7 +220,6 @@ func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message) (ms
 	return msg, err
 }
 
-
 // Checks the preamble bytes to determine if the expected matches
 func isPreambleValid(reader io.Reader) (err error) {
 	defer recoverPanic(func(e error) {
@@ -234,12 +233,12 @@ func isPreambleValid(reader io.Reader) (err error) {
 	}
 	checkError(err)
 	slog.Debug("checking %v against preamble %v", b, ProtoPreamble)
-	for i,v := range b {
+	for i, v := range b {
 		if i < len(ProtoPreamble) && v != ProtoPreamble[i] {
 			return errors.New("preamble invalid")
 		}
 	}
-	return  err
+	return err
 }
 
 // Retrieves the given protocol buffer message from the connection, the connection is expected to send the following:
@@ -255,7 +254,7 @@ func getMessageFromConnectionWs(conn *websocket.Conn, identMap map[int]proto.Mes
 	})()
 	// get total message all at once
 	var buffer []byte
-	t,buffer,err := conn.ReadMessage()
+	t, buffer, err := conn.ReadMessage()
 	if t != websocket.BinaryMessage {
 		return nil, nil
 	}
@@ -341,19 +340,51 @@ func readSize(reader io.Reader) int {
 
 	return SizeReader(bytes)
 }
+func makeMdnsServer(nsb *NanoBuilder) (s *mdns.Server, err error) {
+	defer recoverPanic(func(e error) {
+		slog.Fail("while creating mdns server: %v", e)
+		s = nil
+		err = e
+	})
+	var protobufTypes []string
+	for _, v := range nsb.messageIdentMap {
+		protobufTypes = append(protobufTypes, reflect.TypeOf(v).Name())
+	}
+	mdnsDefinition := &MDefinition{
+		ConnectionInfo: &ConnectionInfo{
+			Websocket: nsb.websocketFlag,
+			Port:      nsb.ns.Port,
+			HostName:  nsb.ns.HostName,
+			Uri:       nsb.ns.Uri,
+		},
+		SupportedMessageTypes: protobufTypes,
+	}
+	definitionStream, err := proto.Marshal(mdnsDefinition)
+	checkError(err)
+	mdnsService, err := mdns.NewMDNSService(nsb.ns.HostName, nsb.ns.MdnsTag(),
+		"", "", int(nsb.ns.MdnsPort), nil, []string{string(definitionStream)})
+	checkError(err)
+	mdnsServer, err := mdns.NewServer(&mdns.Config{Zone: mdnsService})
+	return mdnsServer, err
+}
 
 // Builds a wrapped server instance that will provide a channel of wrapped connections
 func buildServer(nsb *NanoBuilder, customHandler func(net.Listener, *NanoBuilder)) (server *NanoServer, err error) {
 	defer recoverPanic(func(e error) {
-		slog.Fail("Error occurred while serving %v: %v", server.service.ServiceName, e)
+		slog.Fail("while building server %v: %v", server.service.ServiceName, e)
 		err = e
 		server = nil
 	})()
+	//collect supported protobufs
+	mdnsServer,err := makeMdnsServer(nsb)
+
 	server = &NanoServer{
-		newConnections:   make(chan NanoServiceWrapper, MaxNanoCache),
-		connections:      make([]NanoServiceWrapper, MaxNanoCache),
-		closed:           false,
-		service:          nsb.ns,
+		newConnections: make(chan NanoServiceWrapper, MaxNanoCache),
+		connections:    make([]NanoServiceWrapper, MaxNanoCache),
+		closed:         false,
+		service:        nsb.ns,
+		rxTxWaitGroup:  new(sync.WaitGroup),
+		mdnsServer:     mdnsServer,
 	}
 	// start a listener
 	listener, err := nsb.ns.Start()
@@ -377,7 +408,7 @@ func buildServer(nsb *NanoBuilder, customHandler func(net.Listener, *NanoBuilder
 	}
 	// handle shutdown separate from checking for clients
 	go func(listener net.Listener) {
-		for ;;{
+		for ; ; {
 			// every time we get a new client
 			conn, err := listener.Accept()
 			if err != nil {

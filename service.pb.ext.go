@@ -2,6 +2,7 @@ package nan0
 
 import (
 	"net"
+	"strings"
 	"time"
 )
 
@@ -9,6 +10,9 @@ import (
  	Service API
  *******************/
 
+func (ns Service) MdnsTag() string {
+	return strings.Join([]string{ns.ServiceName, ns.ServiceType}, ".")
+}
 
 // Checks if a particular nanoservice is expired based on its start time and time to live
 func (ns Service) IsExpired() bool {

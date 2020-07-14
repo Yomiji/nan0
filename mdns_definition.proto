@@ -1,0 +1,17 @@
+syntax = "proto3";
+package nan0;
+option java_package = "com.kodesport.jnan0.proto";
+option java_outer_classname = "jnan0";
+option go_package = "nan0";
+
+message MDefinition {
+    ConnectionInfo connectionInfo = 1;
+    repeated string supportedMessageTypes = 3;
+}
+
+message ConnectionInfo {
+    bool websocket = 1;
+    int32 port = 3;
+    string hostName = 5;
+    string uri = 7;
+}
