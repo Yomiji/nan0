@@ -43,9 +43,11 @@ func startClientServiceDiscovery(ctx context.Context, ns *Service) <-chan *MDefi
 	entriesCh := make(chan *mdns.ServiceEntry)
 	nan0ServicesFound := make(chan *MDefinition)
 	go func() {
-		<-ctx.Done()
-		close(entriesCh)
-		close(nan0ServicesFound)
+		if ctx != nil {
+			<-ctx.Done()
+			close(entriesCh)
+			close(nan0ServicesFound)
+		}
 	}()
 	go func() {
 		for entry := range entriesCh {
