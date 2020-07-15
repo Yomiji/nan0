@@ -45,6 +45,7 @@ func startClientServiceDiscovery(ctx context.Context, ns *Service) <-chan *MDefi
 	go func() {
 		if ctx != nil {
 			<-ctx.Done()
+			slog.Debug("Shutting down a client discovery channel")
 			close(entriesCh)
 			close(nan0ServicesFound)
 		}

@@ -2,11 +2,18 @@ package nan0_tests
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/yomiji/nan0"
+	"github.com/yomiji/slog"
 )
+
+func init() {
+	slog.ToggleLogging(true, true, true,true)
+}
 
 func Test_Discovery_GetsClient(t *testing.T) {
 	ns := &nan0.Service{
@@ -95,7 +102,48 @@ func Test_Discovery_MultipleServices(t *testing.T) {
 		t.Fatal("Not equal")
 	}
 }
+func TestDiscovery_Websocket(t *testing.T) {
+	ns := &nan0.Service{
+		ServiceName: "WebsocketDiscoveryService",
+		Port:        wsDefaultPort,
+		HostName:    "localhost",
+		ServiceType: "Test",
+		StartTime:   time.Now().Unix(),
+		Uri:         "/",
+	}
+	var err error
+	wsBuilder := ns.NewNanoBuilder().
+		Websocket().
+		AddMessageIdentity(proto.Clone(new(nan0.Service))).
+		AddOrigins("localhost:"+strconv.Itoa(int(wsDefaultPort))).
+		ServiceDiscovery(8000)
+	wsServer, _ = wsBuilder.BuildServer(nil)
+	defer wsServer.Shutdown()
+	StartTestServerThread(wsServer)
 
+	clientConfig := &nan0.Service {
+		ServiceName: "WebsocketDiscoveryService",
+		ServiceType: "Test",
+		StartTime: time.Now().Unix(),
+	}
+	ctx, cancelFunc := context.WithCancel(context.Background())
+
+	client, err := clientConfig.NewNanoBuilder().
+		Websocket().
+		AddMessageIdentity(new(nan0.Service)).
+		Insecure().
+	BuildNan0DNS(ctx)(5 * time.Second, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	defer cancelFunc()
+
+	client.GetSender() <- ns
+	if v,ok := (<-client.GetReceiver()).(*nan0.Service); ok && v.StartTime != ns.StartTime {
+		t.Fatal("Not equal")
+	}
+}
 func BuildServer(ns *nan0.Service) (nan0.Server, error) {
 	server,err := ns.NewNanoBuilder().
 		AddMessageIdentity(new(nan0.Service)).

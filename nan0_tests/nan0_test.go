@@ -193,7 +193,7 @@ func TestWebsocketClient(t *testing.T) {
 	ns := &nan0.Service{
 		ServiceName: "TestService",
 		Port:        wsDefaultPort,
-		HostName:    "",
+		HostName:    "localhost",
 		ServiceType: "Test",
 		StartTime:   time.Now().Unix(),
 		Uri:         "/",
