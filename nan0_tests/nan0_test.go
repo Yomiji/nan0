@@ -18,7 +18,7 @@ var wsDefaultPort int32 = 8080
 
 var wsServer nan0.Server
 
-func startTestServerThread(wsServer nan0.Server) {
+func StartTestServerThread(wsServer nan0.Server) {
 	go func() {
 		conn := <-wsServer.GetConnections()
 		select {
@@ -123,7 +123,7 @@ func TestNan0_FailWithWrongType(t *testing.T) {
 	}
 
 	defer server.Shutdown()
-	startTestServerThread(server)
+	StartTestServerThread(server)
 
 	n, err := builder.Build()
 	defer n.Close()
@@ -161,7 +161,7 @@ func TestNan0_MixedOrderMessageIdent(t *testing.T) {
 	}
 
 	defer server.Shutdown()
-	startTestServerThread(server)
+	StartTestServerThread(server)
 
 
 	builder2 := ns.NewNanoBuilder().
@@ -206,7 +206,7 @@ func TestWebsocketClient(t *testing.T) {
 	wsServer, _ = wsBuilder.BuildServer(nil)
 
 	defer wsServer.Shutdown()
-	startTestServerThread(wsServer)
+	StartTestServerThread(wsServer)
 
 
 	ns2 := &nan0.Service{

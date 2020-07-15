@@ -1,19 +1,15 @@
 package nan0
 
 import (
-	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
 	"net"
-	"reflect"
-	"sync"
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/yomiji/mdns"
 	"github.com/yomiji/slog"
 	"github.com/yomiji/websocket"
 )
@@ -339,93 +335,4 @@ func readSize(reader io.Reader) int {
 	checkError(err)
 
 	return SizeReader(bytes)
-}
-func makeMdnsServer(nsb *NanoBuilder) (s *mdns.Server, err error) {
-	defer recoverPanic(func(e error) {
-		slog.Fail("while creating mdns server: %v", e)
-		s = nil
-		err = e
-	})
-	var protobufTypes []string
-	for _, v := range nsb.messageIdentMap {
-		protobufTypes = append(protobufTypes, reflect.TypeOf(v).Name())
-	}
-	mdnsDefinition := &MDefinition{
-		ConnectionInfo: &ConnectionInfo{
-			Websocket: nsb.websocketFlag,
-			Port:      nsb.ns.Port,
-			HostName:  nsb.ns.HostName,
-			Uri:       nsb.ns.Uri,
-		},
-		SupportedMessageTypes: protobufTypes,
-	}
-	definitionStream, err := proto.Marshal(mdnsDefinition)
-	checkError(err)
-	mdnsService, err := mdns.NewMDNSService(nsb.ns.HostName, nsb.ns.MdnsTag(),
-		"", "", int(nsb.ns.MdnsPort), nil, []string{string(definitionStream)})
-	checkError(err)
-	mdnsServer, err := mdns.NewServer(&mdns.Config{Zone: mdnsService})
-	return mdnsServer, err
-}
-
-// Builds a wrapped server instance that will provide a channel of wrapped connections
-func buildServer(nsb *NanoBuilder, customHandler func(net.Listener, *NanoBuilder)) (server *NanoServer, err error) {
-	defer recoverPanic(func(e error) {
-		slog.Fail("while building server %v: %v", server.service.ServiceName, e)
-		err = e
-		server = nil
-	})()
-	//collect supported protobufs
-	mdnsServer,err := makeMdnsServer(nsb)
-
-	server = &NanoServer{
-		newConnections: make(chan NanoServiceWrapper, MaxNanoCache),
-		connections:    make([]NanoServiceWrapper, MaxNanoCache),
-		closed:         false,
-		service:        nsb.ns,
-		rxTxWaitGroup:  new(sync.WaitGroup),
-		mdnsServer:     mdnsServer,
-	}
-	// start a listener
-	listener, err := nsb.ns.Start()
-	// start secure listener instead
-	if nsb.tlsConfig != nil {
-		cer, err := tls.X509KeyPair([]byte(nsb.tlsConfig.CertFile), []byte(nsb.tlsConfig.KeyFile))
-		if err != nil {
-			slog.Fail("configuration for tls failed due to %v", err)
-		}
-		config := &tls.Config{Certificates: []tls.Certificate{cer}}
-		l := tls.NewListener(listener, config)
-		server.listener = l
-	} else {
-		// start insecure listener
-		server.listener = listener
-	}
-	checkError(err)
-	if customHandler != nil {
-		go customHandler(listener, nsb)
-		return
-	}
-	// handle shutdown separate from checking for clients
-	go func(listener net.Listener) {
-		for ; ; {
-			// every time we get a new client
-			conn, err := listener.Accept()
-			if err != nil {
-				slog.Warn("Listener for %v no longer accepting connections.", server.service.ServiceName)
-				return
-			}
-
-			// create a new nan0 connection to the client
-			newNano, err := nsb.WrapConnection(conn)
-			if err != nil {
-				slog.Warn("Connection dropped due to %v", err)
-			}
-
-			// place the new connection on the channel and in the connections cache
-			server.AddConnection(newNano)
-		}
-	}(listener)
-	slog.Info("Server %v started!", server.GetServiceName())
-	return
 }

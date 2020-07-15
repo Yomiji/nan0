@@ -7,11 +7,12 @@ DiscoveryService implements Stringer, io.Reader, io.Writer
 This API accepts and manages nanoservices
 */
 import (
-	"github.com/yomiji/slog"
-	"github.com/golang/protobuf/proto"
 	"net"
 	"sync"
 	"time"
+
+	"github.com/golang/protobuf/proto"
+	"github.com/yomiji/slog"
 )
 
 // The Nan0 structure is a wrapper around a net/TCP connection which sends
