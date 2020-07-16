@@ -1,6 +1,7 @@
 package nan0
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"sync"
@@ -53,24 +54,6 @@ func (server NanoServer) GetPort() int32 {
 	return server.service.Port
 }
 
-// Exposes the IsExpired method of the service delegate
-func (server NanoServer) IsExpired() bool {
-	server.rxTxWaitGroup.Wait()
-	if server.IsShutdown() {
-		return true
-	}
-	return server.service.IsExpired()
-}
-
-// Exposes the IsAlive method of the service delegate
-func (server NanoServer) IsAlive() bool {
-	server.rxTxWaitGroup.Wait()
-	if server.IsShutdown() {
-		return false
-	}
-	return server.service.IsAlive()
-}
-
 // Get the channel which is fed new connections to the server
 func (server *NanoServer) GetConnections() <-chan NanoServiceWrapper {
 	server.rxTxWaitGroup.Wait()
@@ -118,7 +101,7 @@ func (server *NanoServer) IsShutdown() bool {
 func (server *NanoServer) Shutdown() {
 	server.rxTxWaitGroup.Add(1)
 	defer server.rxTxWaitGroup.Done()
-	recoverPanic(func(e error) {
+	defer recoverPanic(func(e error) {
 		slog.Fail("In shutdown of server, %s: %v", server.GetServiceName(), e)
 	})
 	server.resetConnections()
@@ -129,6 +112,8 @@ func (server *NanoServer) Shutdown() {
 	}
 	if server.wsServer != nil {
 		err := server.wsServer.Close()
+		checkError(err)
+		err = server.wsServer.Shutdown(context.Background())
 		checkError(err)
 	}
 	if server.mdnsServer != nil {

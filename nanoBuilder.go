@@ -279,7 +279,7 @@ func buildServer(nsb *NanoBuilder, customHandler func(net.Listener, *NanoBuilder
 		mdnsServer:     mdnsServer,
 	}
 	// start a listener
-	listener, err := nsb.ns.Start()
+	listener, err := nsb.ns.start()
 	// start secure listener instead
 	if nsb.tlsConfig != nil {
 		cer, err := tls.X509KeyPair([]byte(nsb.tlsConfig.CertFile), []byte(nsb.tlsConfig.KeyFile))
@@ -382,10 +382,17 @@ func buildWebsocketServer(sec *NanoBuilder) (server *NanoServer, err error) {
 		newNano, err := sec.WrapConnection(conn)
 		server.AddConnection(newNano)
 	}
-
-	srv := &http.Server{Addr: composeTcpAddress("", sec.ns.Port)}
+	serveMux := http.NewServeMux()
+	serveMux.Handle(sec.ns.GetUri(), handler)
+	srv := &http.Server{Handler: serveMux, Addr: composeTcpAddress("", sec.ns.Port)}
+	srv.RegisterOnShutdown(func() {
+		for _,conn := range server.connections {
+			if conn != nil && !conn.IsClosed() {
+				conn.Close()
+			}
+		}
+	})
 	server.wsServer = srv
-	http.Handle(sec.ns.GetUri(), handler)
 	go func(serviceName string) {
 		if sec.tlsConfig != nil {
 			if err := srv.ListenAndServeTLS(sec.tlsConfig.CertFile, sec.tlsConfig.KeyFile); err != http.ErrServerClosed {

@@ -40,6 +40,29 @@ func Test_Discovery_GetsClient(t *testing.T) {
 		t.Fatal("Not equal")
 	}
 }
+
+func Test_Discovery_InvalidServerHostname(t *testing.T) {
+	ns := &nan0.Service{
+		ServiceName: "TestService",
+		Port:        nsDefaultPort,
+		HostName:    "Blahblahblah",
+		ServiceType: "Test",
+		StartTime:   time.Now().Unix(),
+	}
+	builder := ns.NewNanoBuilder().AddMessageIdentity(new(nan0.Service)).ServiceDiscovery(8000).Insecure()
+	server,err := builder.BuildServer(nil)
+	if err != nil {
+		t.FailNow()
+	}
+	defer server.Shutdown()
+	_, err = builder.BuildNan0DNS(context.Background())(5 * time.Second, true)
+	if err == nil {
+		t.Fatal("Unexpected success when connecting to invalid hostname")
+	} else {
+		t.Logf("error: %v", err)
+	}
+}
+
 func Test_Discovery_MultipleServices(t *testing.T) {
 	nsService1 := &nan0.Service{
 		ServiceName: "FirstService",

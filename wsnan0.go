@@ -1,13 +1,15 @@
 package nan0
 
 import (
+	"errors"
 	"sync"
 	"time"
 
-	"github.com/yomiji/slog"
 	"github.com/golang/protobuf/proto"
+	"github.com/yomiji/slog"
 	"github.com/yomiji/websocket"
 )
+
 // The WsNan0 structure is a wrapper around a websocket connection which sends
 // and receives protocol buffers across it. Use the provided Builder object to
 // correctly initialize this structure.
@@ -31,7 +33,6 @@ type WsNan0 struct {
 
 	// A connection maintained by this object
 	conn *websocket.Conn
-
 }
 
 // Start the active sender for this Nan0 connection. This enables the 'sender' channel and allows the user to send
@@ -131,7 +132,7 @@ func (n WsNan0) startServiceReceiver(identMap map[int]proto.Message) {
 	}()
 
 	if n.conn != nil && !n.IsClosed() {
-		for ; !n.IsClosed() ; {
+		for ; !n.IsClosed(); {
 			select {
 			case <-n.readerShutdown:
 				return
@@ -155,4 +156,96 @@ func (n WsNan0) startServiceReceiver(identMap map[int]proto.Message) {
 			time.Sleep(10 * time.Microsecond)
 		}
 	}
+}
+
+// Places the given protocol buffer message in the connection, the connection will receive the following data:
+// 	1. The preamble bytes stored in ProtoPreamble (defaults to 7 bytes)
+//  2. The protobuf type identifier (4 bytes)
+//	3. The size of the following protocol buffer message (defaults to 4 bytes)
+// 	4. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
+func putMessageInConnectionWs(conn *websocket.Conn, pb proto.Message, inverseMap map[string]int) (err error) {
+	defer recoverPanic(func(e error) {
+		slog.Debug("Message failed to send: %v due to %v", pb, e)
+		err = e
+	})()
+
+	// figure out if the type of the message is in our list
+	typeString := proto.MessageName(pb)
+	typeVal, ok := inverseMap[typeString]
+	if !ok {
+		checkError(errors.New("type value for message not present"))
+	}
+
+	var bigBytes []byte
+	// marshal the protobuf message
+	v, err := proto.Marshal(pb)
+	checkError(err)
+	protoSize := len(v)
+	//prepare all items
+	bigBytes = append(ProtoPreamble, SizeWriter(typeVal)...)
+	bigBytes = append(bigBytes, SizeWriter(protoSize)...)
+	bigBytes = append(bigBytes, v...)
+
+	// write the preamble, sizes and message
+	slog.Debug("Writing to connection")
+	err = conn.WriteMessage(websocket.BinaryMessage, bigBytes)
+	checkError(err)
+
+	return err
+}
+
+// Retrieves the given protocol buffer message from the connection, the connection is expected to send the following:
+// 	1. The preamble bytes stored in ProtoPreamble (defaults to 7 bytes)
+//  2. The protobuf type identifier (4 bytes)
+//	3. The size of the following protocol buffer message (defaults to 4 bytes)
+// 	4. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
+func getMessageFromConnectionWs(conn *websocket.Conn, identMap map[int]proto.Message) (msg proto.Message, err error) {
+	defer recoverPanic(func(e error) {
+		slog.Debug("Failed to receive message due to %v", e)
+		msg = nil
+		err = e
+	})()
+	// get total message all at once
+	var buffer []byte
+	t, buffer, err := conn.ReadMessage()
+	if t != websocket.BinaryMessage {
+		if t == websocket.CloseMessage {
+			return nil, errors.New("client connection closed")
+		}
+		return nil, nil
+	}
+	checkError(err)
+
+	// get the preamble
+	preamble := buffer[0:len(ProtoPreamble)]
+	// check the preamble
+	err = isPreambleValidWs(preamble)
+	checkError(err)
+	// get the message type
+	messageTypeIdex := len(ProtoPreamble)
+	messageTypeBuf := buffer[messageTypeIdex:(messageTypeIdex + SizeArrayWidth)]
+	messageType := SizeReader(messageTypeBuf)
+
+	// clone message using the retrieved message type
+	msg = proto.Clone(identMap[messageType])
+
+	// get the size of the next message
+	sizeIdex := messageTypeIdex + SizeArrayWidth
+	sizeBuf := buffer[sizeIdex:(sizeIdex + SizeArrayWidth)]
+	size := SizeReader(sizeBuf)
+
+	valueIdex := sizeIdex + SizeArrayWidth
+	valueBuf := buffer[valueIdex:]
+
+	count := len(valueBuf)
+
+	// check the number of bytes received matches the bytes expected
+	if count != size {
+		checkError(errors.New("message size discrepancy while sending"))
+	}
+
+	err = proto.Unmarshal(valueBuf, msg)
+	checkError(err)
+
+	return msg, err
 }

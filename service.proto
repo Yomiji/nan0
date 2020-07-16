@@ -9,7 +9,7 @@ message Service {
     int32 port = 2;
     int32 mdnsPort = 3;
     int64 startTime = 4;
-    string hostName = 5;
+    string hostName = 5; // an externally facing host name which clients connect to
     string uri = 6;
     string serviceName = 7;
     string serviceType = 8;

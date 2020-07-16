@@ -1,7 +1,6 @@
 package nan0_tests
 
 import (
-	"io"
 	"os"
 	"strconv"
 	"testing"
@@ -45,11 +44,14 @@ func TestNan0_Close(t *testing.T) {
 		ServiceType: "Test",
 		StartTime:   time.Now().Unix(),
 	}
-	listener, err := ns.Start()
+
+	server, err := ns.NewNanoBuilder().
+		ToggleWriteDeadline(false).
+		BuildServer(nil)
 	if err != nil {
-		t.Fatal(" \t\tTest Failed, ns.Start() failed \n\t\t")
+		t.Fatalf(" \t\tTest Failed, error: %v\n", err)
 	}
-	defer listener.Close()
+	defer server.Shutdown()
 
 	serviceMsg := proto.Clone(new(nan0.Service))
 	n, err := ns.NewNanoBuilder().
@@ -57,6 +59,9 @@ func TestNan0_Close(t *testing.T) {
 		ToggleWriteDeadline(false).
 		Build()
 
+	if err != nil {
+		t.Fatalf(" \t\tTest Failed, error: %v\n", err)
+	}
 	if n.IsClosed() == true {
 		t.Fatal(" \t\tTest Failed, n.closed == true failed")
 	}
@@ -74,23 +79,18 @@ func TestNan0_GetReceiver(t *testing.T) {
 		ServiceType: "Test",
 		StartTime:   time.Now().Unix(),
 	}
-	listener, err := ns.Start()
-	defer listener.Close()
-
-	if err != nil {
-		t.Fatal(" \t\tTest Failed, ns.Start() failed")
-	}
-	go func() {
-		conn, _ := listener.Accept()
-		for ; ; {
-			io.Copy(conn, conn)
-		}
-
-	}()
 	serviceMsg := proto.Clone(new(nan0.Service))
+	server, err := ns.NewNanoBuilder().
+		AddMessageIdentity(serviceMsg).
+		BuildServer(nil)
+	if err != nil {
+		t.Fatalf(" \t\tTest Failed, error: %v\n", err)
+	}
+	StartTestServerThread(server)
+	defer server.Shutdown()
+
 	n, err := ns.NewNanoBuilder().
 		AddMessageIdentity(serviceMsg).
-		ToggleWriteDeadline(true).
 		Build()
 	if err != nil {
 		t.Fatal("\t\tTest Failed, Nan0 failed to connect to service")

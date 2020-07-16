@@ -25,8 +25,6 @@ type NanoServiceWrapper interface {
 
 // Represents a server object with live-ness and registry to a discovery mechanism
 type Server interface {
-	IsAlive() bool
-	IsExpired() bool
 	IsShutdown() bool
 	Shutdown()
 	GetServiceName() string
