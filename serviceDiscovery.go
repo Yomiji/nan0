@@ -32,7 +32,7 @@ func makeMdnsServer(nsb *NanoBuilder) (s *mdns.Server, err error) {
 	var bytes64 = make([]byte, base64.StdEncoding.EncodedLen(len(definitionBytes)))
 	base64.StdEncoding.Encode(bytes64, definitionBytes)
 	mdnsService, err := mdns.NewMDNSService(nsb.ns.HostName, nsb.ns.MdnsTag(),
-		"", "", int(nsb.ns.MdnsPort), nil, []string{string(bytes64)})
+		"", "", int(nsb.ns.Port), nil, []string{string(bytes64)})
 	checkError(err)
 	mdnsServer, err := mdns.NewServer(&mdns.Config{Zone: mdnsService})
 	return mdnsServer, err
@@ -52,6 +52,7 @@ func startClientServiceDiscovery(ctx context.Context, ns *Service) <-chan *MDefi
 	}()
 	go func() {
 		for entry := range entriesCh {
+			slog.Debug("ServiceDiscovery Entry Found: %+v", entry)
 			if len(entry.InfoFields) > 0 {
 				var mDef = &MDefinition{}
 				mdefBytes, err := base64.StdEncoding.DecodeString(entry.Info)
