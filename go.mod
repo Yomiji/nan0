@@ -1,4 +1,4 @@
-module github.com/yomiji/nan0
+module github.com/yomiji/nan0/v2
 
 go 1.12
 

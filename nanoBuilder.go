@@ -44,9 +44,8 @@ func (ns *Service) NewNanoBuilder() *NanoBuilder {
 }
 
 // Flag indicating if service discovery is enabled (client/server)
-func (sec *NanoBuilder) ServiceDiscovery(port int32) *NanoBuilder {
+func (sec *NanoBuilder) ServiceDiscovery() *NanoBuilder {
 	sec.serviceDiscovery = true
-	sec.ns.MdnsPort = port
 	return sec
 }
 
