@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/yomiji/nan0"
+	"github.com/yomiji/nan0/v2"
 	"github.com/yomiji/slog"
 )
 

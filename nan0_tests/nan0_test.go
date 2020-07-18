@@ -8,7 +8,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes/any"
-	"github.com/yomiji/nan0"
+	"github.com/yomiji/nan0/v2"
 )
 
 var nsDefaultPort int32 = 2324
