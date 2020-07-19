@@ -39,12 +39,11 @@ type Nan0 struct {
 	closeComplete chan bool
 
 	rxTxWaitGroup sync.WaitGroup
-
 }
 
 // Start the active receiver for this Nan0 connection. This enables the 'receiver' channel,
 // constantly reads from the open connection and places the received message on receiver channel
-func (n Nan0) startServiceReceiver(identMap map[int]proto.Message) {
+func (n Nan0) startServiceReceiver(identMap map[int]proto.Message, decryptKey *[32]byte, hmacKey *[32]byte) {
 	defer recoverPanic(func(e error) {
 		slog.Fail("Connection to %v receiver service error occurred: %v", n.GetServiceName(), e)
 	})()
@@ -63,7 +62,7 @@ func (n Nan0) startServiceReceiver(identMap map[int]proto.Message) {
 
 				var newMsg proto.Message
 
-				newMsg, err = getMessageFromConnection(n.conn, identMap)
+				newMsg, err = getMessageFromConnection(n.conn, identMap, decryptKey, hmacKey)
 				if err != nil && newMsg == nil {
 					panic(err)
 				}
@@ -81,7 +80,7 @@ func (n Nan0) startServiceReceiver(identMap map[int]proto.Message) {
 
 // Start the active sender for this Nan0 connection. This enables the 'sender' channel and allows the user to send
 // protocol buffer messages to the server
-func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActive bool) {
+func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActive bool, encryptKey *[32]byte, hmacKey *[32]byte) {
 	defer recoverPanic(func(e error) {
 		slog.Fail("Connection to %v sender service error occurred: %v", n.GetServiceName(), e)
 	})()
@@ -90,7 +89,7 @@ func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActi
 		slog.Debug("Shutting down service sender for %v", n.ServiceName)
 	}()
 	if n.conn != nil && !n.closed {
-		for ; !n.IsClosed() ; {
+		for ; !n.IsClosed(); {
 			select {
 			case <-n.writerShutdown:
 				return
@@ -101,7 +100,7 @@ func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActi
 					checkError(err)
 				}
 				slog.Debug("Sending message %v", pb)
-				err := putMessageInConnection(n.conn, pb.(proto.Message), inverseMap)
+				err := putMessageInConnection(n.conn, pb.(proto.Message), inverseMap, encryptKey, hmacKey)
 				if err != nil {
 					checkError(err)
 				}
@@ -112,10 +111,10 @@ func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActi
 	}
 }
 
-// Closes the open connection and terminates the goroutines associated with reading them
-func (n *Nan0) Close() {
-	n.rxTxWaitGroup.Add(1)
-	defer n.rxTxWaitGroup.Done()
+// performs a close on everything except closing the connection
+func (n *Nan0) softClose() {
+	//n.rxTxWaitGroup.Add(1)
+	//defer n.rxTxWaitGroup.Done()
 	defer recoverPanic(func(e error) {
 		slog.Fail("Failed to close %s due to %v", n.ServiceName, e)
 	})
@@ -129,12 +128,24 @@ func (n *Nan0) Close() {
 	slog.Debug("Writer stream for Nan0 server '%v' shutdown signal sent", n.ServiceName)
 	<-n.closeComplete
 	<-n.closeComplete
-	_ = n.conn.Close()
 	slog.Debug("Dialed connection for server %v closed after shutdown signal received", n.ServiceName)
 	// after goroutines are closed, close the read/write channels
 	close(n.receiver)
 	close(n.sender)
 	n.closed = true
+	slog.Debug("Connection %v is soft closed", n.ServiceName)
+}
+
+// Closes the open connection and terminates the goroutines associated with reading them
+func (n *Nan0) Close() {
+	n.rxTxWaitGroup.Add(1)
+	defer n.rxTxWaitGroup.Done()
+	defer recoverPanic(func(e error) {
+		slog.Fail("Failed to close %s due to %v", n.ServiceName, e)
+	})
+	n.softClose()
+	_ = n.conn.SetReadDeadline(time.Now())
+	_ = n.conn.Close()
 	slog.Warn("Connection to %v is shut down!", n.ServiceName)
 }
 
@@ -149,7 +160,6 @@ func (n Nan0) GetSender() chan<- interface{} {
 	n.rxTxWaitGroup.Wait()
 	return n.sender
 }
-
 
 // Returns a read-only channel that is used to receive a protocol buffer message returned through this connection
 func (n Nan0) GetReceiver() <-chan interface{} {

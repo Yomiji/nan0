@@ -6,12 +6,13 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/yomiji/goprocrypt/v2"
 	"github.com/yomiji/slog"
 )
 
 type baseBuilderOption func(bb *baseBuilder)
 
-type nanoClientFactory func(*baseBuilder)(NanoServiceWrapper, error)
+type nanoClientFactory func(*baseBuilder) (NanoServiceWrapper, error)
 
 type baseBuilder struct {
 	ns                  *Service
@@ -21,26 +22,41 @@ type baseBuilder struct {
 	serviceDiscovery    bool
 	sendBuffer          int
 	receiveBuffer       int
+	secure              bool
 }
+
 func (bb *baseBuilder) initialize(s *Service) {
 	bb.messageIdentMap = make(map[int]proto.Message)
 	bb.inverseIdentMap = make(map[string]int)
 	bb.ns = s
 }
 
-func (bb *baseBuilder) build(opts...baseBuilderOption) {
-	for _,opt := range opts {
+func (bb *baseBuilder) build(opts ...baseBuilderOption) {
+	if bb.secure {
+		AddMessageIdentities(
+			proto.Clone(new(goprocrypt.PublicKey)),
+			proto.Clone(new(goprocrypt.EncryptedMessage)),
+		)(bb)
+	}
+	for _, opt := range opts {
 		opt(bb)
 	}
 }
 
 // Flag indicating if service discovery is enabled (client/server)
-func ServiceDiscovery(bb *baseBuilder)  {
+func ServiceDiscovery(bb *baseBuilder) {
 	bb.serviceDiscovery = true
 }
 
 // Flag indicating this builder is insecure
-func Insecure(_ *baseBuilder)  {
+func Insecure(bb *baseBuilder) {
+	bb.secure = false
+}
+
+// Flag indicating this builder is secure
+// this will set up a secure handshake process on connection (tcp)
+func Secure(bb *baseBuilder) {
+	bb.secure = true
 }
 
 // Part of the builder chain, sets write deadline to the TCPTimeout global value
@@ -56,7 +72,7 @@ func ToggleWriteDeadline(writeDeadline bool) baseBuilderOption {
 // or the transmissions will fail
 func AddMessageIdentities(messageIdents ...proto.Message) baseBuilderOption {
 	return func(bb *baseBuilder) {
-		for _,msgId := range messageIdents {
+		for _, msgId := range messageIdents {
 			addSingleIdentity(msgId, bb)
 		}
 	}
@@ -114,6 +130,7 @@ func WithTimeout(duration time.Duration) clientDNSStrategy {
 		}
 	}
 }
+
 func Default() clientDNSStrategy {
 	return func(strict bool, bb *baseBuilder, definitionChannel <-chan *MDefinition) {
 		if mdef, ok := <-definitionChannel; ok {
@@ -123,6 +140,7 @@ func Default() clientDNSStrategy {
 		}
 	}
 }
+
 func BuildDNS(
 	ctx context.Context,
 	bb *baseBuilder,

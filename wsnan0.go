@@ -37,7 +37,7 @@ type WsNan0 struct {
 
 // Start the active sender for this Nan0 connection. This enables the 'sender' channel and allows the user to send
 // protocol buffer messages to the server
-func (n WsNan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActive bool) {
+func (n WsNan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActive bool, _, _ *[32]byte) {
 	defer recoverPanic(func(e error) {
 		slog.Fail("Connection to %v sender service error occurred: %v", n.GetServiceName(), e)
 	})()
@@ -68,6 +68,9 @@ func (n WsNan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsAct
 	}
 }
 
+func (n WsNan0) softClose() {
+	panic("this is a no-op")
+}
 // Closes the open connection and terminates the goroutines associated with reading them
 func (n WsNan0) Close() {
 	n.rxTxWaitGroup.Add(1)
@@ -122,7 +125,7 @@ func (n WsNan0) Equals(other NanoServiceWrapper) bool {
 
 // Start the active receiver for this Nan0 connection. This enables the 'receiver' channel,
 // constantly reads from the open connection and places the received message on receiver channel
-func (n WsNan0) startServiceReceiver(identMap map[int]proto.Message) {
+func (n WsNan0) startServiceReceiver(identMap map[int]proto.Message, _, _ *[32]byte) {
 	defer recoverPanic(func(e error) {
 		slog.Fail("Connection to %v receiver service error occurred: %v", n.GetServiceName(), e)
 	})()

@@ -98,11 +98,12 @@ func recoverPanic(errfunc func(error)) func() {
 //  2. The protobuf type identifier (4 bytes)
 //	3. The size of the following protocol buffer message (defaults to 4 bytes)
 // 	4. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
-func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[string]int) (err error) {
+func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[string]int, encryptKey *[32]byte, hmacKey *[32]byte) (err error) {
 	defer recoverPanic(func(e error) {
 		slog.Debug("Message failed to send: %v due to %v", pb, e)
 		err = e
 	})()
+	encrypted := encryptKey != nil && hmacKey != nil
 
 	// figure out if the type of the message is in our list
 	typeString := proto.MessageName(pb)
@@ -112,15 +113,18 @@ func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[stri
 	}
 
 	var bigBytes []byte
-	// marshal the protobuf message
-	v, err := proto.Marshal(pb)
-	checkError(err)
-	protoSize := len(v)
-	//prepare all items
-	bigBytes = append(ProtoPreamble, SizeWriter(typeVal)...)
-	bigBytes = append(bigBytes, SizeWriter(protoSize)...)
-	bigBytes = append(bigBytes, v...)
-
+	if encrypted {
+		bigBytes = EncryptProtobuf(pb, typeVal, encryptKey, hmacKey)
+	} else {
+		// marshal the protobuf message
+		v, err := proto.Marshal(pb)
+		checkError(err)
+		protoSize := len(v)
+		//prepare all items
+		bigBytes = append(ProtoPreamble, SizeWriter(typeVal)...)
+		bigBytes = append(bigBytes, SizeWriter(protoSize)...)
+		bigBytes = append(bigBytes, v...)
+	}
 	// write the preamble, sizes and message
 	slog.Debug("Writing to connection")
 	n, err := conn.Write(bigBytes)
@@ -142,12 +146,15 @@ func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[stri
 //  2. The protobuf type identifier (4 bytes)
 //	3. The size of the following protocol buffer message (defaults to 4 bytes)
 // 	4. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
-func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message) (msg proto.Message, err error) {
+func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message, decryptKey *[32]byte, hmacKey *[32]byte) (msg proto.Message, err error) {
 	defer recoverPanic(func(e error) {
 		slog.Debug("Failed to receive message due to %v", e)
 		msg = nil
 		err = e
 	})()
+
+	// determine if this is an encrypted msg
+	encrypted := decryptKey != nil && hmacKey != nil
 
 	// check the preamble
 	err = isPreambleValid(conn)
@@ -158,7 +165,11 @@ func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message) (ms
 	// get the message type bytes
 	messageType := readSize(conn)
 	msg = proto.Clone(identMap[messageType])
-
+	// get the size of the hmac if it is encrypted
+	var hmacSize int
+	if encrypted {
+		hmacSize = readSize(conn)
+	}
 	// get the size of the next message
 	size := readSize(conn)
 	// create a byte buffer that will store the whole expected message
@@ -173,8 +184,13 @@ func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message) (ms
 		checkError(errors.New("message size discrepancy while sending"))
 	}
 
-	err = proto.Unmarshal(v, msg)
-	checkError(err)
+	if encrypted {
+		err := DecryptProtobuf(v, msg, hmacSize, decryptKey, hmacKey)
+		checkError(err)
+	} else {
+		err = proto.Unmarshal(v, msg)
+		checkError(err)
+	}
 
 	return msg, err
 }
@@ -199,8 +215,6 @@ func isPreambleValid(reader io.Reader) (err error) {
 	}
 	return err
 }
-
-
 
 func makeSendChannelFromBuilder(bb *baseBuilder) (buf chan interface{}) {
 	if bb.sendBuffer == 0 {

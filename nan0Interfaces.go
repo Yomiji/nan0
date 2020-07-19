@@ -6,8 +6,9 @@ import (
 
 // Any object which wraps a connection to send and receive different protocol buffers
 type NanoServiceWrapper interface {
-	startServiceSender(map[string]int, bool)
-	startServiceReceiver(map[int]proto.Message)
+	softClose()
+	startServiceSender(map[string]int, bool,*[32]byte,*[32]byte)
+	startServiceReceiver(map[int]proto.Message,*[32]byte,*[32]byte)
 	Closer
 	TxRx
 	Identity

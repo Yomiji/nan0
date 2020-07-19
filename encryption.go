@@ -14,7 +14,7 @@ import (
 )
 
 // Decrypts, authenticates and unmarshals a protobuf message using the given encrypt/decrypt key and hmac key
-func DecryptProtobuf(rawData []byte, msg *proto.Message, hmacSize int, decryptKey *[32]byte, hmacKey *[32]byte) (err error) {
+func DecryptProtobuf(rawData []byte, msg proto.Message, hmacSize int, decryptKey *[32]byte, hmacKey *[32]byte) (err error) {
 	slog.Debug("Decrypting a byte slice of size %v", len(rawData))
 	defer recoverPanic(func(e error) {
 		slog.Fail("decryption issue: %v", e)
@@ -32,12 +32,11 @@ func DecryptProtobuf(rawData []byte, msg *proto.Message, hmacSize int, decryptKe
 	// check the hmac signature to ensure authenticity
 	if CheckHMAC(realData,mac,hmacKey) {
 		// unmarshal the bytes, placing result into msg
-		err = proto.Unmarshal(realData, *msg)
+		err = proto.Unmarshal(realData, msg)
 		checkError(err)
 		slog.Debug("Decrypt completed successfully, result: %v", msg)
 	} else {
 		// fail out if the message authenticity cannot be verified
-		slog.Fail("Couldn't decrypt message, authentication failed")
 		checkError(errors.New("authentication failed"))
 	}
 	return err

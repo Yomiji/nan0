@@ -83,8 +83,8 @@ func wrapConnectionWs(connection *websocket.Conn, bb *baseBuilder) (nan0 NanoSer
 		rxTxWaitGroup:  new(sync.WaitGroup),
 	}
 
-	go nan0.startServiceReceiver(bb.messageIdentMap)
-	go nan0.startServiceSender(bb.inverseIdentMap, bb.writeDeadlineActive)
+	go nan0.startServiceReceiver(bb.messageIdentMap, nil, nil)
+	go nan0.startServiceSender(bb.inverseIdentMap, bb.writeDeadlineActive, nil, nil)
 
 	return nan0, err
 }
