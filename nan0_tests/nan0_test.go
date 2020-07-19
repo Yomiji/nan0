@@ -46,8 +46,9 @@ func TestNan0_Close(t *testing.T) {
 	}
 
 	server, err := ns.NewNanoBuilder().
-		ToggleWriteDeadline(false).
-		BuildServer(nil)
+		BuildNanoServer(
+			nan0.ToggleWriteDeadline(false),
+		)
 	if err != nil {
 		t.Fatalf(" \t\tTest Failed, error: %v\n", err)
 	}
@@ -55,10 +56,10 @@ func TestNan0_Close(t *testing.T) {
 
 	serviceMsg := proto.Clone(new(nan0.Service))
 	n, err := ns.NewNanoBuilder().
-		AddMessageIdentity(serviceMsg).
-		ToggleWriteDeadline(false).
-		Build()
-
+		BuildNanoClient(
+			nan0.AddMessageIdentity(serviceMsg),
+			nan0.ToggleWriteDeadline(false),
+		)
 	if err != nil {
 		t.Fatalf(" \t\tTest Failed, error: %v\n", err)
 	}
@@ -81,8 +82,9 @@ func TestNan0_GetReceiver(t *testing.T) {
 	}
 	serviceMsg := proto.Clone(new(nan0.Service))
 	server, err := ns.NewNanoBuilder().
-		AddMessageIdentity(serviceMsg).
-		BuildServer(nil)
+		BuildNanoServer(
+			nan0.AddMessageIdentity(serviceMsg),
+		)
 	if err != nil {
 		t.Fatalf(" \t\tTest Failed, error: %v\n", err)
 	}
@@ -90,8 +92,9 @@ func TestNan0_GetReceiver(t *testing.T) {
 	defer server.Shutdown()
 
 	n, err := ns.NewNanoBuilder().
-		AddMessageIdentity(serviceMsg).
-		Build()
+		BuildNanoClient(
+			nan0.AddMessageIdentity(serviceMsg),
+		)
 	if err != nil {
 		t.Fatal("\t\tTest Failed, Nan0 failed to connect to service")
 	}
@@ -114,18 +117,18 @@ func TestNan0_FailWithWrongType(t *testing.T) {
 		StartTime:   time.Now().Unix(),
 	}
 
-	builder := ns.NewNanoBuilder().
-		AddMessageIdentity(proto.Clone(new(any.Any))).
-		ToggleWriteDeadline(true)
-	server, err := builder.BuildServer(nil)
+	builder := ns.NewNanoBuilder()
+	server, err := builder.BuildNanoServer(
+		nan0.AddMessageIdentity(proto.Clone(new(any.Any))),
+		nan0.ToggleWriteDeadline(true),
+	)
 	if err != nil {
 		t.Fatal("\t\tTest Failed BuildServer failed")
 	}
-
 	defer server.Shutdown()
 	StartTestServerThread(server)
 
-	n, err := builder.Build()
+	n, err := builder.BuildNanoClient()
 	defer n.Close()
 
 	if err != nil {
@@ -152,10 +155,14 @@ func TestNan0_MixedOrderMessageIdent(t *testing.T) {
 		StartTime:   time.Now().Unix(),
 	}
 
-	builder1 := ns.NewNanoBuilder().
-		AddMessageIdentities(proto.Clone(new(nan0.Service)), proto.Clone(new(any.Any))).
-		ToggleWriteDeadline(true)
-	server, err := builder1.BuildServer(nil)
+	builder1 := ns.NewNanoBuilder()
+	server, err := builder1.BuildNanoServer(
+		nan0.ToggleWriteDeadline(true),
+		nan0.AddMessageIdentities(
+			proto.Clone(new(nan0.Service)),
+			proto.Clone(new(any.Any)),
+		),
+	)
 	if err != nil {
 		t.Fatal("\t\tTest Failed BuildServer failed")
 	}
@@ -164,11 +171,14 @@ func TestNan0_MixedOrderMessageIdent(t *testing.T) {
 	StartTestServerThread(server)
 
 
-	builder2 := ns.NewNanoBuilder().
-		AddMessageIdentities(proto.Clone(new(any.Any)), proto.Clone(new(nan0.Service))).
-		ToggleWriteDeadline(true)
-	n, err := builder2.Build()
-
+	builder2 := ns.NewNanoBuilder()
+	n, err := builder2.BuildNanoClient(
+		nan0.ToggleWriteDeadline(true),
+		nan0.AddMessageIdentities(
+			proto.Clone(new(nan0.Service)),
+			proto.Clone(new(any.Any)),
+		),
+	)
 	if err != nil {
 		t.Fatal("\t\tTest Failed, Nan0 failed to connect to service")
 	}
@@ -199,11 +209,11 @@ func TestWebsocketClient(t *testing.T) {
 		Uri:         "/",
 	}
 	var err error
-	wsBuilder := ns.NewNanoBuilder().
-		Websocket().
-		AddMessageIdentity(proto.Clone(new(nan0.Service))).
-		AddOrigins("localhost:"+strconv.Itoa(int(wsDefaultPort)))
-	wsServer, _ = wsBuilder.BuildServer(nil)
+	wsBuilder := ns.NewWebsocketBuilder()
+	wsServer, _ = wsBuilder.BuildWebsocketServer(
+		nan0.AddMessageIdentity(proto.Clone(new(nan0.Service))),
+		wsBuilder.AddOrigins("localhost:"+strconv.Itoa(int(wsDefaultPort))),
+	)
 
 	defer wsServer.Shutdown()
 	StartTestServerThread(wsServer)
@@ -218,10 +228,8 @@ func TestWebsocketClient(t *testing.T) {
 		Uri:         "/",
 	}
 
-	receiver, err := ns2.NewNanoBuilder().
-		Websocket().
-		AddMessageIdentity(new(nan0.Service)).
-		Build()
+	receiver, err := ns2.NewWebsocketBuilder().
+		BuildWebsocketClient(nan0.AddMessageIdentity(new(nan0.Service)))
 	if err != nil {
 		t.Fatalf("Failed to establish client connection")
 	}

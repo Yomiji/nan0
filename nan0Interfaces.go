@@ -8,26 +8,66 @@ import (
 type NanoServiceWrapper interface {
 	startServiceSender(map[string]int, bool)
 	startServiceReceiver(map[int]proto.Message)
+	Closer
+	TxRx
+	Identity
+	Equality
+}
 
-	// Close the wrapper goroutines and the underlying connections
+// Close the wrapper goroutines and the underlying connections
+// Check if the wrapper is closed
+type Closer interface {
 	Close()
-	// Check if the wrapper is closed
 	IsClosed() bool
-	// Return the sender channel for this nanoservice wrapper, messages are sent along this route
+}
+
+// Transmit and Receive
+type TxRx interface {
+	Sender
+	Receiver
+}
+
+// Return the sender channel for this nanoservice wrapper, messages are sent along this route
+type Sender interface {
 	GetSender() chan<- interface{}
-	// Return the receiver channel for this nanoservice wrapper, messages are received from this
+}
+
+// Return the receiver channel for this nanoservice wrapper, messages are received from this
+type Receiver interface {
 	GetReceiver() <-chan interface{}
-	// Get the service name identifier
-	GetServiceName() string
-	// Determine if two instances are equal
+}
+
+// Determine if two instances are equal
+type Equality interface {
 	Equals(NanoServiceWrapper) bool
+}
+
+// Get the name of a service or client
+type Identity interface {
+	GetServiceName() string
 }
 
 // Represents a server object with live-ness and registry to a discovery mechanism
 type Server interface {
+	Identity
+	ServiceLifecycle
+	ConnectionHandler
+	DiscoverableService
+}
+
+// Handles shutdown procedure
+type ServiceLifecycle interface {
 	IsShutdown() bool
 	Shutdown()
-	GetServiceName() string
+}
+
+// Handles connections established
+type ConnectionHandler interface {
 	GetConnections() <-chan NanoServiceWrapper
 	AddConnection(NanoServiceWrapper)
+}
+
+// Generates discovery tags
+type DiscoverableService interface {
+	MdnsTag() string
 }

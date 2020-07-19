@@ -3,13 +3,16 @@ package nan0
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/yomiji/mdns"
 	"github.com/yomiji/slog"
 )
 
-func makeMdnsServer(nsb *NanoBuilder) (s *mdns.Server, err error) {
+type ClientDNSFactory func(strictProtocols bool) (nan0 NanoServiceWrapper, err error)
+
+func makeMdnsServer(nsb *baseBuilder, ws bool) (s *mdns.Server, err error) {
 	defer recoverPanic(func(e error) {
 		slog.Fail("while creating mdns server: %v", e)
 		s = nil
@@ -20,7 +23,7 @@ func makeMdnsServer(nsb *NanoBuilder) (s *mdns.Server, err error) {
 
 	mdnsDefinition := &MDefinition{
 		ConnectionInfo: &ConnectionInfo{
-			Websocket: nsb.websocketFlag,
+			Websocket: ws,
 			Port:      nsb.ns.Port,
 			HostName:  nsb.ns.HostName,
 			Uri:       nsb.ns.Uri,
@@ -38,7 +41,7 @@ func makeMdnsServer(nsb *NanoBuilder) (s *mdns.Server, err error) {
 	return mdnsServer, err
 }
 
-func startClientServiceDiscovery(ctx context.Context, ns *Service) <-chan *MDefinition {
+func startClientServiceDiscovery(ctx context.Context, ns DiscoverableService) <-chan *MDefinition {
 	serviceTag := ns.MdnsTag()
 	entriesCh := make(chan *mdns.ServiceEntry)
 	nan0ServicesFound := make(chan *MDefinition)
@@ -76,9 +79,9 @@ func startClientServiceDiscovery(ctx context.Context, ns *Service) <-chan *MDefi
 	return nan0ServicesFound
 }
 
-func getIdentityMessageNames(nsb *NanoBuilder) []string {
+func getIdentityMessageNames(bb *baseBuilder) []string {
 	var protobufTypes []string
-	for _, v := range nsb.messageIdentMap {
+	for _, v := range bb.messageIdentMap {
 		protobufTypes = append(protobufTypes, proto.MessageName(v))
 	}
 	return protobufTypes
@@ -90,4 +93,31 @@ func populateServiceFromMDef(service *Service, definition *MDefinition) {
 	if definition.ConnectionInfo.Websocket {
 		service.Uri = definition.ConnectionInfo.Uri
 	}
+}
+
+func allProtocolsMatch(sec *baseBuilder, definition *MDefinition) bool {
+	builderNames := getIdentityMessageNames(sec)
+	mdefNames := definition.SupportedMessageTypes
+	if len(builderNames) != len(mdefNames) {
+		return false
+	}
+	var checkerMap = make(map[string]bool)
+	for _, name := range builderNames {
+		checkerMap[name] = true
+	}
+	for _, name := range mdefNames {
+		if _, ok := checkerMap[name]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+
+func processMdef(sec *baseBuilder, mdef *MDefinition, strict bool) error {
+	if strict && !allProtocolsMatch(sec, mdef) {
+		return fmt.Errorf("builder fails to satisfy all protocols for service %s", sec.ns.ServiceName)
+	}
+	populateServiceFromMDef(sec.ns, mdef)
+	return nil
 }

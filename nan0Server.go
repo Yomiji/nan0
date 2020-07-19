@@ -54,6 +54,10 @@ func (server NanoServer) GetPort() int32 {
 	return server.service.Port
 }
 
+func (server NanoServer) MdnsTag() string {
+	return server.service.MdnsTag()
+}
+
 // Get the channel which is fed new connections to the server
 func (server *NanoServer) GetConnections() <-chan NanoServiceWrapper {
 	server.rxTxWaitGroup.Wait()

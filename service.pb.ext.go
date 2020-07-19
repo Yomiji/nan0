@@ -9,6 +9,21 @@ import (
  	Service API
  *******************/
 
+func (ns *Service) NewNanoBuilder() *NanoBuilder {
+	nsb := new(NanoBuilder)
+	nsb.baseBuilder = new(baseBuilder)
+	nsb.initialize(ns)
+	return nsb
+}
+
+func (ns *Service) NewWebsocketBuilder() *WebsocketBuilder {
+	wsb := new(WebsocketBuilder)
+	wsb.baseBuilder = new(baseBuilder)
+	wsb.initialize(ns)
+	wsb.websocketFlag = true
+	return wsb
+}
+
 func (ns Service) MdnsTag() string {
 	return strings.Join([]string{ns.ServiceName, ns.ServiceType}, ".")
 }
@@ -24,6 +39,6 @@ func (ns Service) Equals(other Service) bool {
 }
 
 // Starts a tcp listener for this service
-func (ns *Service) start() (net.Listener, error) {
+func (ns Service) start() (net.Listener, error) {
 	return net.Listen("tcp", composeTcpAddress("", ns.Port))
 }

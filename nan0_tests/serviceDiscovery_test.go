@@ -12,7 +12,7 @@ import (
 )
 
 func init() {
-	slog.ToggleLogging(true, true, true,true)
+	slog.ToggleLogging(true, true, true, true)
 }
 
 func Test_Discovery_GetsClient(t *testing.T) {
@@ -23,20 +23,24 @@ func Test_Discovery_GetsClient(t *testing.T) {
 		ServiceType: "Test",
 		StartTime:   time.Now().Unix(),
 	}
-	builder := ns.NewNanoBuilder().AddMessageIdentity(new(nan0.Service)).ServiceDiscovery(8000).Insecure()
-	server,err := builder.BuildServer(nil)
+	builder := ns.NewNanoBuilder()
+	server, err := builder.BuildNanoServer(
+		nan0.AddMessageIdentity(new(nan0.Service)),
+		nan0.ServiceDiscovery,
+		nan0.Insecure,
+	)
 	if err != nil {
 		t.FailNow()
 	}
 	StartTestServerThread(server)
 	defer server.Shutdown()
-	client, err := builder.BuildNan0DNS(context.Background())(5 * time.Second, true)
+	client, err := builder.BuildNanoDNS(context.Background(), nan0.WithTimeout(5*time.Second))(true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client.Close()
 	client.GetSender() <- ns
-	if v,ok := (<-client.GetReceiver()).(*nan0.Service); ok && v.StartTime != ns.StartTime {
+	if v, ok := (<-client.GetReceiver()).(*nan0.Service); ok && v.StartTime != ns.StartTime {
 		t.Fatal("Not equal")
 	}
 }
@@ -49,13 +53,17 @@ func Test_Discovery_InvalidServerHostname(t *testing.T) {
 		ServiceType: "Test",
 		StartTime:   time.Now().Unix(),
 	}
-	builder := ns.NewNanoBuilder().AddMessageIdentity(new(nan0.Service)).ServiceDiscovery(8000).Insecure()
-	server,err := builder.BuildServer(nil)
+	builder := ns.NewNanoBuilder()
+	server, err := builder.BuildNanoServer(
+		nan0.AddMessageIdentity(new(nan0.Service)),
+		nan0.ServiceDiscovery,
+		nan0.Insecure,
+	)
 	if err != nil {
 		t.FailNow()
 	}
 	defer server.Shutdown()
-	_, err = builder.BuildNan0DNS(context.Background())(5 * time.Second, true)
+	_, err = builder.BuildNanoDNS(context.Background(), nan0.WithTimeout(5*time.Second))(true)
 	if err == nil {
 		t.Fatal("Unexpected success when connecting to invalid hostname")
 	} else {
@@ -66,14 +74,14 @@ func Test_Discovery_InvalidServerHostname(t *testing.T) {
 func Test_Discovery_MultipleServices(t *testing.T) {
 	nsService1 := &nan0.Service{
 		ServiceName: "FirstService",
-		Port:        nsDefaultPort+1,
+		Port:        nsDefaultPort + 1,
 		HostName:    "localhost",
 		ServiceType: "Test",
 		StartTime:   time.Now().Unix(),
 	}
 	nsService2 := &nan0.Service{
 		ServiceName: "SecondService",
-		Port:        nsDefaultPort+2,
+		Port:        nsDefaultPort + 2,
 		HostName:    "localhost",
 		ServiceType: "Test",
 		StartTime:   time.Now().Unix(),
@@ -95,33 +103,40 @@ func Test_Discovery_MultipleServices(t *testing.T) {
 	defer s2.Shutdown()
 
 	//Connect to service 1 and send data
-	clientBuilder := nsClient.NewNanoBuilder().
-		AddMessageIdentity(new(nan0.Service)).
-		Insecure()
+	clientBuilder := nsClient.NewNanoBuilder()
+
 	ctx, cancelFunc := context.WithCancel(context.Background())
-	client, err := clientBuilder.BuildNan0DNS(ctx)(5 * time.Second, true)
+	client, err := clientBuilder.BuildNanoDNS(ctx,
+		nan0.WithTimeout(5*time.Second),
+		nan0.AddMessageIdentity(new(nan0.Service)),
+		nan0.Insecure,
+	)(true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	client.GetSender() <- nsClient
-	if v,ok := (<-client.GetReceiver()).(*nan0.Service); ok && v.StartTime != nsClient.StartTime {
+	if v, ok := (<-client.GetReceiver()).(*nan0.Service); ok && v.StartTime != nsClient.StartTime {
 		t.Fatal("Not equal")
 	}
 	client.Close()
 	cancelFunc()
 
+	ctx, cancelFunc = context.WithCancel(context.Background())
+	defer cancelFunc()
 	//Connect to service 1 and send data
 	nsClient.ServiceName = nsService2.ServiceName
 	nsClient.ServiceType = nsService2.ServiceType
-	clientBuilder = nsClient.NewNanoBuilder().
-		AddMessageIdentity(new(nan0.Service)).
-		Insecure()
-	client, err = clientBuilder.BuildNan0DNS(context.Background())(5 * time.Second, true)
+	clientBuilder = nsClient.NewNanoBuilder()
+	client, err = clientBuilder.BuildNanoDNS(ctx,
+		nan0.WithTimeout(5*time.Second),
+		nan0.AddMessageIdentity(new(nan0.Service)),
+		nan0.Insecure,
+	)(true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	client.GetSender() <- nsClient
-	if v,ok := (<-client.GetReceiver()).(*nan0.Service); ok && v.StartTime != nsClient.StartTime {
+	if v, ok := (<-client.GetReceiver()).(*nan0.Service); ok && v.StartTime != nsClient.StartTime {
 		t.Fatal("Not equal")
 	}
 }
@@ -135,27 +150,28 @@ func TestDiscovery_Websocket(t *testing.T) {
 		Uri:         "/",
 	}
 	var err error
-	wsBuilder := ns.NewNanoBuilder().
-		Websocket().
-		AddMessageIdentity(proto.Clone(new(nan0.Service))).
-		AddOrigins("localhost:"+strconv.Itoa(int(wsDefaultPort))).
-		ServiceDiscovery(8000)
-	wsServer, _ = wsBuilder.BuildServer(nil)
+	wsBuilder := ns.NewWebsocketBuilder()
+	wsServer, _ = wsBuilder.BuildWebsocketServer(
+		nan0.AddMessageIdentity(proto.Clone(new(nan0.Service))),
+		wsBuilder.AddOrigins("localhost:"+strconv.Itoa(int(wsDefaultPort))),
+		nan0.ServiceDiscovery,
+	)
 	defer wsServer.Shutdown()
 	StartTestServerThread(wsServer)
 
-	clientConfig := &nan0.Service {
+	clientConfig := &nan0.Service{
 		ServiceName: "WebsocketDiscoveryService",
 		ServiceType: "Test",
-		StartTime: time.Now().Unix(),
+		StartTime:   time.Now().Unix(),
 	}
 	ctx, cancelFunc := context.WithCancel(context.Background())
 
-	client, err := clientConfig.NewNanoBuilder().
-		Websocket().
-		AddMessageIdentity(new(nan0.Service)).
-		Insecure().
-	BuildNan0DNS(ctx)(5 * time.Second, true)
+	client, err := clientConfig.NewWebsocketBuilder().
+		BuildWebsocketDNS(ctx,
+			nan0.WithTimeout(5*time.Second),
+			nan0.AddMessageIdentity(new(nan0.Service)),
+			nan0.Insecure,
+		)(true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,16 +179,16 @@ func TestDiscovery_Websocket(t *testing.T) {
 	defer cancelFunc()
 
 	client.GetSender() <- ns
-	if v,ok := (<-client.GetReceiver()).(*nan0.Service); ok && v.StartTime != ns.StartTime {
+	if v, ok := (<-client.GetReceiver()).(*nan0.Service); ok && v.StartTime != ns.StartTime {
 		t.Fatal("Not equal")
 	}
 }
 func BuildServer(ns *nan0.Service) (nan0.Server, error) {
-	server,err := ns.NewNanoBuilder().
-		AddMessageIdentity(new(nan0.Service)).
-		ServiceDiscovery(8000).
-		Insecure().
-		BuildServer(nil)
+	server, err := ns.NewNanoBuilder().BuildNanoServer(
+		nan0.AddMessageIdentity(new(nan0.Service)),
+		nan0.ServiceDiscovery,
+		nan0.Insecure,
+	)
 	if err != nil {
 		return nil, err
 	}

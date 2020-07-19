@@ -202,20 +202,20 @@ func isPreambleValid(reader io.Reader) (err error) {
 
 
 
-func makeSendChannelFromBuilder(sec NanoBuilder) (buf chan interface{}) {
-	if sec.sendBuffer == 0 {
+func makeSendChannelFromBuilder(bb *baseBuilder) (buf chan interface{}) {
+	if bb.sendBuffer == 0 {
 		buf = make(chan interface{})
 	} else {
-		buf = make(chan interface{}, sec.sendBuffer)
+		buf = make(chan interface{}, bb.sendBuffer)
 	}
 	return
 }
 
-func makeReceiveChannelFromBuilder(sec NanoBuilder) (buf chan interface{}) {
-	if sec.receiveBuffer == 0 {
+func makeReceiveChannelFromBuilder(bb *baseBuilder) (buf chan interface{}) {
+	if bb.receiveBuffer == 0 {
 		buf = make(chan interface{})
 	} else {
-		buf = make(chan interface{}, sec.receiveBuffer)
+		buf = make(chan interface{}, bb.receiveBuffer)
 	}
 	return
 }
