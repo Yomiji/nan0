@@ -15,7 +15,6 @@ import (
 
 // Decrypts, authenticates and unmarshals a protobuf message using the given encrypt/decrypt key and hmac key
 func DecryptProtobuf(rawData []byte, msg proto.Message, hmacSize int, decryptKey *[32]byte, hmacKey *[32]byte) (err error) {
-	slog.Debug("Decrypting a byte slice of size %v", len(rawData))
 	defer recoverPanic(func(e error) {
 		slog.Fail("decryption issue: %v", e)
 		err = e
@@ -24,7 +23,6 @@ func DecryptProtobuf(rawData []byte, msg proto.Message, hmacSize int, decryptKey
 	// decrypt message
 	decryptedBytes, err := Decrypt(rawData, decryptKey)
 	checkError(err)
-
 	// split the hmac signature from the real data based hmacSize
 	mac := decryptedBytes[:hmacSize]
 	realData := decryptedBytes[hmacSize:]
@@ -34,7 +32,6 @@ func DecryptProtobuf(rawData []byte, msg proto.Message, hmacSize int, decryptKey
 		// unmarshal the bytes, placing result into msg
 		err = proto.Unmarshal(realData, msg)
 		checkError(err)
-		slog.Debug("Decrypt completed successfully, result: %v", msg)
 	} else {
 		// fail out if the message authenticity cannot be verified
 		checkError(errors.New("authentication failed"))
@@ -44,7 +41,6 @@ func DecryptProtobuf(rawData []byte, msg proto.Message, hmacSize int, decryptKey
 
 // Signs and encrypts a marshalled protobuf message using the given encrypt/decrypt key and hmac key
 func EncryptProtobuf(pb proto.Message, typeVal int,  encryptKey *[32]byte, hmacKey *[32]byte) []byte {
-	slog.Debug("Encrypting %v", pb)
 	defer recoverPanic(func(e error) {
 		slog.Fail("decryption issue: %v", e)
 	})()
@@ -67,7 +63,6 @@ func EncryptProtobuf(pb proto.Message, typeVal int,  encryptKey *[32]byte, hmacK
 	result = append(result, SizeWriter(macSize)...)
 	result = append(result, SizeWriter(encryptedMsgSize)...)
 	result = append(result, encryptedMsg...)
-	slog.Debug("Encrypt complete, result: %v", result)
 	return result
 }
 

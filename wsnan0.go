@@ -56,7 +56,6 @@ func (n WsNan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsAct
 					err := n.conn.SetWriteDeadline(time.Now().Add(TCPTimeout))
 					checkError(err)
 				}
-				slog.Debug("Sending message %v", pb)
 				err := putMessageInConnectionWs(n.conn, pb.(proto.Message), inverseMap)
 				if err != nil {
 					checkError(err)
@@ -151,7 +150,6 @@ func (n WsNan0) startServiceReceiver(identMap map[int]proto.Message, _, _ *[32]b
 				}
 
 				if newMsg != nil {
-					slog.Debug("sending %v on receiver", newMsg)
 					//Send the message received to the awaiting receive buffer
 					n.receiver <- newMsg
 				}
@@ -173,7 +171,7 @@ func putMessageInConnectionWs(conn *websocket.Conn, pb proto.Message, inverseMap
 	})()
 
 	// figure out if the type of the message is in our list
-	typeString := proto.MessageName(pb)
+	typeString := getProtobufMessageName(pb)
 	typeVal, ok := inverseMap[typeString]
 	if !ok {
 		checkError(errors.New("type value for message not present"))

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yomiji/slog"
+	"github.com/yomiji/goprocrypt/v2"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -50,6 +50,10 @@ func Insecure(bb *baseBuilder) {
 // this will set up a secure handshake process on connection (tcp)
 func Secure(bb *baseBuilder) {
 	bb.secure = true
+	AddMessageIdentities(
+		proto.Clone(new(goprocrypt.PublicKey)),
+		proto.Clone(new(goprocrypt.EncryptedMessage)),
+	)(bb)
 }
 
 // Part of the builder chain, sets write deadline to the TCPTimeout global value
@@ -83,8 +87,6 @@ func AddMessageIdentity(messageIdent proto.Message) baseBuilderOption {
 func addSingleIdentity(messageIdent proto.Message, bb *baseBuilder) {
 	t := getProtobufMessageName(messageIdent)
 	i := int(hashString(t))
-	slog.Debug("Identity: %s, Hash: %d", t, i)
-	slog.Debug("Ident bytes: %v", SizeWriter(i))
 	bb.messageIdentMap[i] = messageIdent
 	bb.inverseIdentMap[t] = i
 }

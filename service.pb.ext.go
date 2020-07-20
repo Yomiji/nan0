@@ -18,7 +18,6 @@ func (ns *Service) NewNanoBuilder() *NanoBuilder {
 
 func (ns *Service) NewWebsocketBuilder() *WebsocketBuilder {
 	wsb := new(WebsocketBuilder)
-	wsb.baseBuilder = new(baseBuilder)
 	wsb.initialize(ns)
 	wsb.websocketFlag = true
 	return wsb

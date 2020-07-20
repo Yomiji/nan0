@@ -6,14 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/yomiji/nan0/v2"
-	"github.com/yomiji/slog"
+	"google.golang.org/protobuf/proto"
 )
-
-func init() {
-	slog.ToggleLogging(true, true, true, true)
-}
 
 func Test_Discovery_GetsClient(t *testing.T) {
 	ns := &nan0.Service{
@@ -150,10 +145,9 @@ func TestDiscovery_Websocket(t *testing.T) {
 		Uri:         "/",
 	}
 	var err error
-	wsBuilder := ns.NewWebsocketBuilder()
-	wsServer, _ = wsBuilder.BuildWebsocketServer(
+	wsServer, _ = ns.NewWebsocketBuilder().BuildWebsocketServer(
 		nan0.AddMessageIdentity(proto.Clone(new(nan0.Service))),
-		wsBuilder.AddOrigins("localhost:"+strconv.Itoa(int(wsDefaultPort))),
+		nan0.AddOrigins("localhost:"+strconv.Itoa(int(wsDefaultPort))),
 		nan0.ServiceDiscovery,
 	)
 	defer wsServer.Shutdown()

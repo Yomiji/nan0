@@ -12,38 +12,25 @@ import (
 	"github.com/yomiji/goprocrypt/v2"
 	"github.com/yomiji/mdns"
 	"github.com/yomiji/slog"
-	"google.golang.org/protobuf/proto"
 )
 
 type NanoBuilder struct {
 	*baseBuilder
 }
 
-func appendSecureOptions(nsb *NanoBuilder, opts []baseBuilderOption) {
-	if nsb.secure {
-		opts = append(opts, AddMessageIdentities(
-			proto.Clone(goprocrypt.PublicKey{}),
-			proto.Clone(new(goprocrypt.EncryptedMessage)),
-		))
-	}
-}
-
 // Establish a connection creating a first-class Nan0 connection which will communicate with the server
 func (nsb *NanoBuilder) BuildNanoClient(opts ...baseBuilderOption) (nan0 NanoServiceWrapper, err error) {
-	appendSecureOptions(nsb, opts)
 	nsb.build(opts...)
 	return buildTcpClient(nsb.baseBuilder)
 }
 
 func (nsb *NanoBuilder) BuildNanoDNS(ctx context.Context, strategy clientDNSStrategy, opts ...baseBuilderOption) ClientDNSFactory {
-	appendSecureOptions(nsb, opts)
 	nsb.build(opts...)
 	return BuildDNS(ctx, nsb.baseBuilder, buildTcpClient, strategy)
 }
 
 // Build a wrapped server instance
 func (nsb *NanoBuilder) BuildNanoServer(opts ...baseBuilderOption) (*NanoServer, error) {
-	appendSecureOptions(nsb, opts)
 	nsb.build(opts...)
 	return buildTcpServer(nsb.baseBuilder)
 }
@@ -96,16 +83,17 @@ func buildTcpClient(sec *baseBuilder) (nan0 NanoServiceWrapper, err error) {
 		// 4. send encrypted message over insecure conn
 		// 5. wrap secure connection and resume secure comms
 		*/
-		slog.Debug("Begin handshake with %v!", sec.ns.ServiceName)
+		slog.Debug("Begin security handshake with %v!", sec.ns.ServiceName)
 		tempNano, err := wrapConnectionTcp(conn, sec, nil, nil)
 		checkError(err)
 		select {
 		case serverKey := <-tempNano.GetReceiver():
+			rsaPublicKey := goprocrypt.PbKeyToRsaKey(serverKey.(*goprocrypt.PublicKey))
 			encMsg, err := goprocrypt.Encrypt(nil,
 				&ApiKey{
 					EncKey:  encKey[:],
 					HmacKey: hmac[:],
-				}, serverKey.(*rsa.PublicKey), privKey)
+				}, rsaPublicKey, privKey)
 			checkError(err)
 			tempNano.GetSender() <- encMsg
 			tempNano.softClose()
@@ -179,20 +167,29 @@ func buildTcpServer(nsb *baseBuilder) (server *NanoServer, err error) {
 					slog.Warn("Connection dropped due to %v", err)
 					continue
 				}
-				var encKey *[32]byte
-				var hmac *[32]byte
+				var encKey = &[32]byte{}
+				var hmac = &[32]byte{}
 				tempNano.GetSender() <- goprocrypt.RsaKeyToPbKey(*rsaPub)
 				select {
 				case encMsg := <-tempNano.GetReceiver():
+					if _,ok := encMsg.(*goprocrypt.EncryptedMessage); !ok {
+						slog.Fail("Security handshake intercepted wrong message format")
+						tempNano.Close()
+						continue
+					}
 					apiKey := new(ApiKey)
 					err := goprocrypt.Decrypt(nil, encMsg.(*goprocrypt.EncryptedMessage), rsaPriv, apiKey)
 					if err != nil {
 						slog.Fail("Security handshake failure: %v", err)
+						tempNano.Close()
+						continue
 					}
 					copy(encKey[:], apiKey.EncKey)
 					copy(hmac[:], apiKey.HmacKey)
+					slog.Debug("End security handshake successfully")
 				case <-time.After(TCPTimeout):
 					slog.Fail("Security handshake timeout")
+					tempNano.Close()
 					continue
 				}
 				tempNano.softClose()

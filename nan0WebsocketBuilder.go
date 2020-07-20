@@ -2,6 +2,7 @@ package nan0
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"net/url"
 	"sync"
@@ -11,9 +12,12 @@ import (
 	"github.com/yomiji/websocket"
 )
 
+type wsBuilderOption func(*WebsocketBuilder)
+
 type TLSConfig struct {
 	CertFile string
 	KeyFile  string
+	tls.Config
 }
 
 type WebsocketBuilder struct {
@@ -21,19 +25,20 @@ type WebsocketBuilder struct {
 	origin        string
 	origins       []*url.URL
 	tls           *TLSConfig
-	*baseBuilder
+	baseBuilder
 }
 
 // Enables secure websocket handling for this connection
-func (wsb *WebsocketBuilder) Secure(config *TLSConfig) baseBuilderOption {
-	return func(_ *baseBuilder) {
-		wsb.tls = config
+func SecureWs(config TLSConfig) wsBuilderOption {
+	return func(bb *WebsocketBuilder) {
+		bb.secure = true
+		bb.tls = &config
 	}
 }
 
 // Adds origin checks to websocket handler (no use for clients)
-func (wsb *WebsocketBuilder) AddOrigins(origin ...string) baseBuilderOption {
-	return func(_ *baseBuilder) {
+func AddOrigins(origin ...string) wsBuilderOption {
+	return func(wsb *WebsocketBuilder) {
 		for _, v := range origin {
 			u, err := url.Parse(v)
 			if err == nil {
@@ -44,25 +49,38 @@ func (wsb *WebsocketBuilder) AddOrigins(origin ...string) baseBuilderOption {
 }
 
 // Adds origin checks to websocket handler (no use for clients)
-func (wsb *WebsocketBuilder) AppendOrigins(origin ...*url.URL) baseBuilderOption {
-	return func(_ *baseBuilder) {
+func AppendOrigins(origin ...*url.URL) wsBuilderOption {
+	return func(wsb *WebsocketBuilder) {
 		wsb.origins = append(wsb.origins, origin...)
 	}
 }
 
-func (wsb *WebsocketBuilder) BuildWebsocketClient(opts ...baseBuilderOption) (nan0 NanoServiceWrapper, err error) {
-	wsb.build(opts...)
-	return buildWebsocketClient(wsb.baseBuilder)
+func (wsb *WebsocketBuilder) BuildWebsocketClient(opts ...interface{}) (nan0 NanoServiceWrapper, err error) {
+	buildOpts(opts, wsb)
+	return wrapWsClient(wsb)(&wsb.baseBuilder)
 }
 
-func (wsb *WebsocketBuilder) BuildWebsocketDNS(ctx context.Context, strategy clientDNSStrategy, opts ...baseBuilderOption) ClientDNSFactory {
-	wsb.build(opts...)
-	return BuildDNS(ctx, wsb.baseBuilder, buildWebsocketClient, strategy)
+func (wsb *WebsocketBuilder) BuildWebsocketDNS(ctx context.Context, strategy clientDNSStrategy, opts ...interface{}) ClientDNSFactory {
+	buildOpts(opts, wsb)
+	return BuildDNS(ctx, &wsb.baseBuilder, wrapWsClient(wsb), strategy)
 }
 
-func (wsb *WebsocketBuilder) BuildWebsocketServer(opts ...baseBuilderOption) (*NanoServer, error) {
-	wsb.build(opts...)
+func (wsb *WebsocketBuilder) BuildWebsocketServer(opts ...interface{}) (*NanoServer, error) {
+	buildOpts(opts, wsb)
 	return buildWebsocketServer(wsb)
+}
+
+func buildOpts(opts []interface{}, wsb *WebsocketBuilder) {
+	for _, opt := range opts {
+		switch ot := opt.(type) {
+		case baseBuilderOption:
+			ot(&wsb.baseBuilder)
+		case wsBuilderOption:
+			ot(wsb)
+		case func(builder *baseBuilder):
+			ot(&wsb.baseBuilder)
+		}
+	}
 }
 
 func wrapConnectionWs(connection *websocket.Conn, bb *baseBuilder) (nan0 NanoServiceWrapper, err error) {
@@ -89,18 +107,63 @@ func wrapConnectionWs(connection *websocket.Conn, bb *baseBuilder) (nan0 NanoSer
 	return nan0, err
 }
 
-func buildWebsocketClient(bb *baseBuilder) (nan0 NanoServiceWrapper, err error) {
-	// setup a url to dial the websocket, hostname shouldn't include protocol
-	u := url.URL{Scheme: "ws", Host: composeTcpAddress(bb.ns.HostName, bb.ns.Port), Path: bb.ns.Uri}
-	// call the websocket server
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-	checkError(err)
+func wrapWsClient(wsb *WebsocketBuilder) nanoClientFactory {
+	return func (bb *baseBuilder) (nan0 NanoServiceWrapper, err error) {
+		// setup a url to dial the websocket, hostname shouldn't include protocol
+		var u url.URL
+		var conn *websocket.Conn
+		if bb.secure {
+			u = url.URL{Scheme: "wss", Host: composeTcpAddress(bb.ns.HostName, bb.ns.Port), Path: bb.ns.Uri}
 
-	return wrapConnectionWs(conn, bb)
+			d := new(websocket.Dialer)
+			d.TLSClientConfig = &wsb.tls.Config
+			conn, _, err = d.Dial(u.String(), nil)
+		} else {
+			u = url.URL{Scheme: "ws", Host: composeTcpAddress(bb.ns.HostName, bb.ns.Port), Path: bb.ns.Uri}
+			conn, _, err = websocket.DefaultDialer.Dial(u.String(), nil)
+		}
+		// call the websocket server
+
+		checkError(err)
+
+		return wrapConnectionWs(conn, bb)
+	}
 }
+//func buildWebsocketClient(bb *baseBuilder) (nan0 NanoServiceWrapper, err error) {
+//	// setup a url to dial the websocket, hostname shouldn't include protocol
+//	var u url.URL
+//	var conn *websocket.Conn
+//	if bb.secure {
+//		u = url.URL{Scheme: "wss", Host: composeTcpAddress(bb.ns.HostName, bb.ns.Port), Path: bb.ns.Uri}
+//		//dialer := &websocket.Dialer{
+//		//	NetDial: func(network, addr string) (net.Conn, error) {
+//		//		return tls.Dial(network, addr,&tls.Config{
+//		//			RootCAs:                     nil,
+//		//			InsecureSkipVerify:          true,
+//		//		})
+//		//	},
+//		//}
+//		//conn, _, err = dialer.Dial(u.String(), nil)
+//		//conn, _, err = websocket.DefaultDialer.Dial(u.String(), nil)
+//		d := new(websocket.Dialer)
+//		d.TLSClientConfig= &tls.Config{
+//				RootCAs:                     nil,
+//				InsecureSkipVerify:          true,
+//		}
+//		conn, _, err = d.Dial(u.String(), nil)
+//	} else {
+//		u = url.URL{Scheme: "ws", Host: composeTcpAddress(bb.ns.HostName, bb.ns.Port), Path: bb.ns.Uri}
+//		conn, _, err = websocket.DefaultDialer.Dial(u.String(), nil)
+//	}
+//	// call the websocket server
+//
+//	checkError(err)
+//
+//	return wrapConnectionWs(conn, bb)
+//}
 
 func makeMdnsServerWs(wsb *WebsocketBuilder) (s *mdns.Server, err error) {
-	return makeMdnsServer(wsb.baseBuilder, wsb.websocketFlag)
+	return makeMdnsServer(&wsb.baseBuilder, wsb.websocketFlag)
 }
 
 func buildWebsocketServer(wsb *WebsocketBuilder) (server *NanoServer, err error) {
@@ -114,6 +177,7 @@ func buildWebsocketServer(wsb *WebsocketBuilder) (server *NanoServer, err error)
 		mdnsServer, err = makeMdnsServerWs(wsb)
 		checkError(err)
 	}
+
 	server = &NanoServer{
 		newConnections: make(chan NanoServiceWrapper),
 		connections:    make([]NanoServiceWrapper, MaxNanoCache),
@@ -127,6 +191,7 @@ func buildWebsocketServer(wsb *WebsocketBuilder) (server *NanoServer, err error)
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
 	}
+
 	// create a CheckOrigin function suitable for the upgrader
 	upgrader.CheckOrigin = func(r *http.Request) bool {
 		for _, v := range wsb.origins {
@@ -160,9 +225,10 @@ func buildWebsocketServer(wsb *WebsocketBuilder) (server *NanoServer, err error)
 		} else {
 			slog.Info("%s has connected to the server.", conn.RemoteAddr())
 		}
-		newNano, err := wrapConnectionWs(conn, wsb.baseBuilder)
+		newNano, err := wrapConnectionWs(conn, &wsb.baseBuilder)
 		server.AddConnection(newNano)
 	}
+
 	serveMux := http.NewServeMux()
 	serveMux.Handle(wsb.ns.GetUri(), handler)
 	srv := &http.Server{Handler: serveMux, Addr: composeTcpAddress("", wsb.ns.Port)}
@@ -173,8 +239,9 @@ func buildWebsocketServer(wsb *WebsocketBuilder) (server *NanoServer, err error)
 			}
 		}
 	})
+
 	server.wsServer = srv
-	go func(serviceName string) {
+	go func(serviceName string, wsb WebsocketBuilder) {
 		if wsb.tls == nil {
 			if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 				slog.Fail("Websocket server: %s", err)
@@ -189,7 +256,7 @@ func buildWebsocketServer(wsb *WebsocketBuilder) (server *NanoServer, err error)
 			}
 		}
 
-	}(server.GetServiceName())
+	}(server.GetServiceName(), *wsb)
 
 	return
 }

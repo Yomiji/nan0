@@ -104,13 +104,13 @@ func recoverPanic(errfunc func(error)) func() {
 // 	4. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
 func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[string]int, encryptKey *[32]byte, hmacKey *[32]byte) (err error) {
 	defer recoverPanic(func(e error) {
-		slog.Debug("Message failed to send: %v due to %v", pb, e)
+		slog.Debug("Message failed to send due to %v", e)
 		err = e
 	})()
 	encrypted := encryptKey != nil && hmacKey != nil
 
 	// figure out if the type of the message is in our list
-	typeString := proto.MessageName(pb)
+	typeString := getProtobufMessageName(pb)
 	typeVal, ok := inverseMap[typeString]
 	if !ok {
 		checkError(errors.New("type value for message not present"))
@@ -169,6 +169,9 @@ func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message, dec
 	// get the message type bytes
 	messageType := readSize(conn)
 	msg = proto.Clone(identMap[messageType])
+	if msg == nil {
+		checkError(fmt.Errorf("message ident %v not found", messageType))
+	}
 	// get the size of the hmac if it is encrypted
 	var hmacSize int
 	if encrypted {
@@ -181,7 +184,6 @@ func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message, dec
 	// get the protobuf bytes from the reader
 	count, err := conn.Read(v)
 	checkError(err)
-	slog.Debug("Read data %v", v)
 
 	// check the number of bytes received matches the bytes expected
 	if count != size {
@@ -261,7 +263,6 @@ func readSize(reader io.Reader) int {
 	})()
 	bytes := make([]byte, SizeArrayWidth)
 	_, err := reader.Read(bytes)
-	slog.Debug("read size array %v", bytes)
 	checkError(err)
 
 	return SizeReader(bytes)

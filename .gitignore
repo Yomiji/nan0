@@ -104,3 +104,4 @@ fabric.properties
 .idea/markdown-navigator.xml
 /vendor/
 /Gopkg.lock
+*.pem

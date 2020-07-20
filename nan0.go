@@ -68,7 +68,6 @@ func (n Nan0) startServiceReceiver(identMap map[int]proto.Message, decryptKey *[
 				}
 
 				if newMsg != nil {
-					slog.Debug("sending %v on receiver", newMsg)
 					//Send the message received to the awaiting receive buffer
 					n.receiver <- newMsg
 				}
@@ -99,7 +98,6 @@ func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActi
 					err := n.conn.SetWriteDeadline(time.Now().Add(TCPTimeout))
 					checkError(err)
 				}
-				slog.Debug("Sending message %v", pb)
 				err := putMessageInConnection(n.conn, pb.(proto.Message), inverseMap, encryptKey, hmacKey)
 				if err != nil {
 					checkError(err)
@@ -146,6 +144,7 @@ func (n *Nan0) Close() {
 	n.softClose()
 	_ = n.conn.SetReadDeadline(time.Now())
 	_ = n.conn.Close()
+	n.closed = true
 	slog.Warn("Connection to %v is shut down!", n.ServiceName)
 }
 

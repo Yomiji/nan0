@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes/any"
 	"github.com/yomiji/nan0/v2"
 	"github.com/yomiji/slog"
+	"google.golang.org/protobuf/proto"
 )
 
 var nsDefaultPort int32 = 2324
@@ -32,7 +32,11 @@ func StartTestServerThread(wsServer nan0.Server) {
 
 func TestMain(m *testing.M) {
 	slog.ToggleLogging(true, true, true, true)
-	slog.ToggleLineNumberPrinting(true, true, true, true)
+	//slog.ToggleLineNumberPrinting(true, true, true, false)
+	//slog.FilterSource("nan0Util.go")
+	//slog.FilterSource("nan0.go")
+	//slog.FilterSource("encryption.go")
+	//slog.FilterSource("nanoBuilder.go")
 	os.Exit(m.Run())
 }
 
@@ -103,7 +107,7 @@ func TestNan0_GetReceiver(t *testing.T) {
 	receiver := n.GetReceiver()
 	sender <- ns
 	waitingVal := <-receiver
-	if waitingVal.(proto.Message).String() != ns.String() {
+	if waitingVal.(*nan0.Service).String() != ns.String() {
 		t.Fatalf(" \t\tTest Failed, \n\t\tsent %v, \n\t\treceived: %v\n", ns, waitingVal)
 	}
 }
@@ -212,7 +216,7 @@ func TestWebsocketClient(t *testing.T) {
 	wsBuilder := ns.NewWebsocketBuilder()
 	wsServer, _ = wsBuilder.BuildWebsocketServer(
 		nan0.AddMessageIdentity(proto.Clone(new(nan0.Service))),
-		wsBuilder.AddOrigins("localhost:"+strconv.Itoa(int(wsDefaultPort))),
+		nan0.AddOrigins("localhost:"+strconv.Itoa(int(wsDefaultPort))),
 	)
 
 	defer wsServer.Shutdown()

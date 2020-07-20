@@ -55,7 +55,6 @@ func startClientServiceDiscovery(ctx context.Context, ns DiscoverableService) <-
 	}()
 	go func() {
 		for entry := range entriesCh {
-			slog.Debug("ServiceDiscovery Entry Found: %+v", entry)
 			if len(entry.InfoFields) > 0 {
 				var mDef = &MDefinition{}
 				mdefBytes, err := base64.StdEncoding.DecodeString(entry.Info)
