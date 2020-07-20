@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/golang/protobuf/proto"
-	"github.com/yomiji/goprocrypt/v2"
 	"github.com/yomiji/slog"
+	"google.golang.org/protobuf/proto"
 )
 
 type baseBuilderOption func(bb *baseBuilder)
@@ -32,12 +31,6 @@ func (bb *baseBuilder) initialize(s *Service) {
 }
 
 func (bb *baseBuilder) build(opts ...baseBuilderOption) {
-	if bb.secure {
-		AddMessageIdentities(
-			proto.Clone(new(goprocrypt.PublicKey)),
-			proto.Clone(new(goprocrypt.EncryptedMessage)),
-		)(bb)
-	}
 	for _, opt := range opts {
 		opt(bb)
 	}
@@ -88,7 +81,7 @@ func AddMessageIdentity(messageIdent proto.Message) baseBuilderOption {
 }
 
 func addSingleIdentity(messageIdent proto.Message, bb *baseBuilder) {
-	t := proto.MessageName(messageIdent)
+	t := getProtobufMessageName(messageIdent)
 	i := int(hashString(t))
 	slog.Debug("Identity: %s, Hash: %d", t, i)
 	slog.Debug("Ident bytes: %v", SizeWriter(i))

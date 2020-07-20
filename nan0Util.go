@@ -9,8 +9,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/yomiji/slog"
+	"google.golang.org/protobuf/proto"
 )
 
 /*******************
@@ -56,6 +56,10 @@ var SizeWriter = func(size int) (bytes []byte) {
 /*************************
 	Helper Functions
 *************************/
+
+func getProtobufMessageName(message proto.Message) string {
+	return string(message.ProtoReflect().Descriptor().FullName())
+}
 
 // From
 func hashString(s string) uint32 {

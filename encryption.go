@@ -9,8 +9,8 @@ import (
 	"errors"
 	"io"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/yomiji/slog"
+	"google.golang.org/protobuf/proto"
 )
 
 // Decrypts, authenticates and unmarshals a protobuf message using the given encrypt/decrypt key and hmac key

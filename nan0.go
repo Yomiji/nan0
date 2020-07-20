@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/yomiji/slog"
+	"google.golang.org/protobuf/proto"
 )
 
 // The Nan0 structure is a wrapper around a net/TCP connection which sends
@@ -113,8 +113,8 @@ func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActi
 
 // performs a close on everything except closing the connection
 func (n *Nan0) softClose() {
-	//n.rxTxWaitGroup.Add(1)
-	//defer n.rxTxWaitGroup.Done()
+	n.rxTxWaitGroup.Add(1)
+	defer n.rxTxWaitGroup.Done()
 	defer recoverPanic(func(e error) {
 		slog.Fail("Failed to close %s due to %v", n.ServiceName, e)
 	})

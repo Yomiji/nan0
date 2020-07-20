@@ -5,9 +5,9 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/yomiji/mdns"
 	"github.com/yomiji/slog"
+	"google.golang.org/protobuf/proto"
 )
 
 type ClientDNSFactory func(strictProtocols bool) (nan0 NanoServiceWrapper, err error)
@@ -82,7 +82,7 @@ func startClientServiceDiscovery(ctx context.Context, ns DiscoverableService) <-
 func getIdentityMessageNames(bb *baseBuilder) []string {
 	var protobufTypes []string
 	for _, v := range bb.messageIdentMap {
-		protobufTypes = append(protobufTypes, proto.MessageName(v))
+		protobufTypes = append(protobufTypes, getProtobufMessageName(v))
 	}
 	return protobufTypes
 }

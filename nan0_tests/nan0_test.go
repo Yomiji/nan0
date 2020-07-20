@@ -9,6 +9,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes/any"
 	"github.com/yomiji/nan0/v2"
+	"github.com/yomiji/slog"
 )
 
 var nsDefaultPort int32 = 2324
@@ -30,9 +31,8 @@ func StartTestServerThread(wsServer nan0.Server) {
 }
 
 func TestMain(m *testing.M) {
-	//nan0.Debug = log.New(os.Stdout, "Nan0 [DEBUG]: ", log.Ldate|log.Ltime)
-	//nan0.ToggleLineNumberPrinting(true, true, true, true)
-
+	slog.ToggleLogging(true, true, true, true)
+	slog.ToggleLineNumberPrinting(true, true, true, true)
 	os.Exit(m.Run())
 }
 

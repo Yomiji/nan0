@@ -1,7 +1,7 @@
 package nan0
 
 import (
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 )
 
 // Any object which wraps a connection to send and receive different protocol buffers

@@ -12,25 +12,38 @@ import (
 	"github.com/yomiji/goprocrypt/v2"
 	"github.com/yomiji/mdns"
 	"github.com/yomiji/slog"
+	"google.golang.org/protobuf/proto"
 )
 
 type NanoBuilder struct {
 	*baseBuilder
 }
 
+func appendSecureOptions(nsb *NanoBuilder, opts []baseBuilderOption) {
+	if nsb.secure {
+		opts = append(opts, AddMessageIdentities(
+			proto.Clone(goprocrypt.PublicKey{}),
+			proto.Clone(new(goprocrypt.EncryptedMessage)),
+		))
+	}
+}
+
 // Establish a connection creating a first-class Nan0 connection which will communicate with the server
 func (nsb *NanoBuilder) BuildNanoClient(opts ...baseBuilderOption) (nan0 NanoServiceWrapper, err error) {
+	appendSecureOptions(nsb, opts)
 	nsb.build(opts...)
 	return buildTcpClient(nsb.baseBuilder)
 }
 
 func (nsb *NanoBuilder) BuildNanoDNS(ctx context.Context, strategy clientDNSStrategy, opts ...baseBuilderOption) ClientDNSFactory {
+	appendSecureOptions(nsb, opts)
 	nsb.build(opts...)
 	return BuildDNS(ctx, nsb.baseBuilder, buildTcpClient, strategy)
 }
 
 // Build a wrapped server instance
 func (nsb *NanoBuilder) BuildNanoServer(opts ...baseBuilderOption) (*NanoServer, error) {
+	appendSecureOptions(nsb, opts)
 	nsb.build(opts...)
 	return buildTcpServer(nsb.baseBuilder)
 }
@@ -160,6 +173,7 @@ func buildTcpServer(nsb *baseBuilder) (server *NanoServer, err error) {
 				// 5. wrap secure connection
 				*/
 				// create a temporary insecure nan0 connection to the client
+				slog.Debug("Accepting secure connection...")
 				tempNano, err := wrapConnectionTcp(conn, nsb, nil, nil)
 				if err != nil {
 					slog.Warn("Connection dropped due to %v", err)
