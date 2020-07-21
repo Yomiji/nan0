@@ -77,38 +77,54 @@ func TestNan0_Close(t *testing.T) {
 }
 
 func TestNan0_GetReceiver(t *testing.T) {
-	ns := &nan0.Service{
+	// create the service configuration
+	serviceConf := &nan0.Service{
 		ServiceName: "TestService",
 		Port:        nsDefaultPort,
 		HostName:    "127.0.0.1",
 		ServiceType: "Test",
 		StartTime:   time.Now().Unix(),
 	}
-	serviceMsg := proto.Clone(new(nan0.Service))
-	server, err := ns.NewNanoBuilder().
+	// message types need to be registered before used so add a new one
+	server, err := serviceConf.NewNanoBuilder().
 		BuildNanoServer(
-			nan0.AddMessageIdentity(serviceMsg),
+			nan0.AddMessageIdentity(new(nan0.Service)),
 		)
 	if err != nil {
 		t.Fatalf(" \t\tTest Failed, error: %v\n", err)
 	}
-	StartTestServerThread(server)
+	// remember to ALWAYS shut your server down when finished
 	defer server.Shutdown()
+	// This server is configured to read a value and echo that value back out
+	go func() {
+		conn := <-server.GetConnections()
+		select {
+		case msg,ok := <-conn.GetReceiver():
+			if ok {
+				conn.GetSender() <- msg
+			}
+		}
+	}()
 
-	n, err := ns.NewNanoBuilder().
+	// server and clients can use the same builder with different finalizer methods
+	client, err := serviceConf.NewNanoBuilder().
 		BuildNanoClient(
-			nan0.AddMessageIdentity(serviceMsg),
+			nan0.AddMessageIdentity(new(nan0.Service)),
 		)
 	if err != nil {
 		t.Fatal("\t\tTest Failed, Nan0 failed to connect to service")
 	}
-	defer n.Close()
-	sender := n.GetSender()
-	receiver := n.GetReceiver()
-	sender <- ns
+	// ALWAYS close your client
+	defer client.Close()
+	sender := client.GetSender()
+	receiver := client.GetReceiver()
+	// senders and receivers naturally block, unless you set a buffer value
+	// they can also be used with 'select' statements for non-blocking communication
+	sender <- serviceConf
 	waitingVal := <-receiver
-	if waitingVal.(*nan0.Service).String() != ns.String() {
-		t.Fatalf(" \t\tTest Failed, \n\t\tsent %v, \n\t\treceived: %v\n", ns, waitingVal)
+
+	if waitingVal.(*nan0.Service).String() != serviceConf.String() {
+		t.Fatalf(" \t\tTest Failed, \n\t\tsent %v, \n\t\treceived: %v\n", serviceConf, waitingVal)
 	}
 }
 
