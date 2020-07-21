@@ -126,17 +126,15 @@ func WithTimeout(duration time.Duration) clientDNSStrategy {
 	}
 }
 
-func Default() clientDNSStrategy {
-	return func(strict bool, bb *baseBuilder, definitionChannel <-chan *MDefinition) {
-		if mdef, ok := <-definitionChannel; ok {
-			checkError(processMdef(bb, mdef, strict))
-		} else {
-			checkError(fmt.Errorf("DNS is closed"))
-		}
+func Default(strict bool, bb *baseBuilder, definitionChannel <-chan *MDefinition) {
+	if mdef, ok := <-definitionChannel; ok {
+		checkError(processMdef(bb, mdef, strict))
+	} else {
+		checkError(fmt.Errorf("DNS is closed"))
 	}
 }
 
-func BuildDNS(
+func buildDNS(
 	ctx context.Context,
 	bb *baseBuilder,
 	clientBuilder nanoClientFactory,

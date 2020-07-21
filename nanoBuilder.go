@@ -26,7 +26,7 @@ func (nsb *NanoBuilder) BuildNanoClient(opts ...baseBuilderOption) (nan0 NanoSer
 
 func (nsb *NanoBuilder) BuildNanoDNS(ctx context.Context, strategy clientDNSStrategy, opts ...baseBuilderOption) ClientDNSFactory {
 	nsb.build(opts...)
-	return BuildDNS(ctx, nsb.baseBuilder, buildTcpClient, strategy)
+	return buildDNS(ctx, nsb.baseBuilder, buildTcpClient, strategy)
 }
 
 // Build a wrapped server instance

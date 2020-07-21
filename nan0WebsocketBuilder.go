@@ -62,7 +62,7 @@ func (wsb *WebsocketBuilder) BuildWebsocketClient(opts ...interface{}) (nan0 Nan
 
 func (wsb *WebsocketBuilder) BuildWebsocketDNS(ctx context.Context, strategy clientDNSStrategy, opts ...interface{}) ClientDNSFactory {
 	buildOpts(opts, wsb)
-	return BuildDNS(ctx, &wsb.baseBuilder, wrapWsClient(wsb), strategy)
+	return buildDNS(ctx, &wsb.baseBuilder, wrapWsClient(wsb), strategy)
 }
 
 func (wsb *WebsocketBuilder) BuildWebsocketServer(opts ...interface{}) (*NanoServer, error) {
@@ -129,38 +129,6 @@ func wrapWsClient(wsb *WebsocketBuilder) nanoClientFactory {
 		return wrapConnectionWs(conn, bb)
 	}
 }
-//func buildWebsocketClient(bb *baseBuilder) (nan0 NanoServiceWrapper, err error) {
-//	// setup a url to dial the websocket, hostname shouldn't include protocol
-//	var u url.URL
-//	var conn *websocket.Conn
-//	if bb.secure {
-//		u = url.URL{Scheme: "wss", Host: composeTcpAddress(bb.ns.HostName, bb.ns.Port), Path: bb.ns.Uri}
-//		//dialer := &websocket.Dialer{
-//		//	NetDial: func(network, addr string) (net.Conn, error) {
-//		//		return tls.Dial(network, addr,&tls.Config{
-//		//			RootCAs:                     nil,
-//		//			InsecureSkipVerify:          true,
-//		//		})
-//		//	},
-//		//}
-//		//conn, _, err = dialer.Dial(u.String(), nil)
-//		//conn, _, err = websocket.DefaultDialer.Dial(u.String(), nil)
-//		d := new(websocket.Dialer)
-//		d.TLSClientConfig= &tls.Config{
-//				RootCAs:                     nil,
-//				InsecureSkipVerify:          true,
-//		}
-//		conn, _, err = d.Dial(u.String(), nil)
-//	} else {
-//		u = url.URL{Scheme: "ws", Host: composeTcpAddress(bb.ns.HostName, bb.ns.Port), Path: bb.ns.Uri}
-//		conn, _, err = websocket.DefaultDialer.Dial(u.String(), nil)
-//	}
-//	// call the websocket server
-//
-//	checkError(err)
-//
-//	return wrapConnectionWs(conn, bb)
-//}
 
 func makeMdnsServerWs(wsb *WebsocketBuilder) (s *mdns.Server, err error) {
 	return makeMdnsServer(&wsb.baseBuilder, wsb.websocketFlag)
