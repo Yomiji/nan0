@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
-	"net"
 	"time"
 
 	"github.com/yomiji/slog"
@@ -102,7 +101,7 @@ func recoverPanic(errfunc func(error)) func() {
 //  2. The protobuf type identifier (4 bytes)
 //	3. The size of the following protocol buffer message (defaults to 4 bytes)
 // 	4. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
-func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[string]int, encryptKey *[32]byte, hmacKey *[32]byte) (err error) {
+func putMessageInConnection(conn io.Writer, pb proto.Message, inverseMap map[string]int, encryptKey *[32]byte, hmacKey *[32]byte) (err error) {
 	defer recoverPanic(func(e error) {
 		slog.Debug("Message failed to send due to %v", e)
 		err = e
@@ -150,7 +149,7 @@ func putMessageInConnection(conn net.Conn, pb proto.Message, inverseMap map[stri
 //  2. The protobuf type identifier (4 bytes)
 //	3. The size of the following protocol buffer message (defaults to 4 bytes)
 // 	4. The protocol buffer message (slice of bytes the size of the result of #2 as integer)
-func getMessageFromConnection(conn net.Conn, identMap map[int]proto.Message, decryptKey *[32]byte, hmacKey *[32]byte) (msg proto.Message, err error) {
+func getMessageFromConnection(conn io.Reader, identMap map[int]proto.Message, decryptKey *[32]byte, hmacKey *[32]byte) (msg proto.Message, err error) {
 	defer recoverPanic(func(e error) {
 		slog.Debug("Failed to receive message due to %v", e)
 		msg = nil

@@ -3,6 +3,7 @@ module github.com/yomiji/nan0/v2
 go 1.12
 
 require (
+	github.com/golang/protobuf v1.4.2
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/yomiji/genrsa v0.0.0-20190417071837-af8624dbc91e
 	github.com/yomiji/goprocrypt/v2 v2.0.5

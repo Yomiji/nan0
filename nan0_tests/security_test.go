@@ -88,7 +88,7 @@ func TestSecurity_SecureObjectSent(t *testing.T) {
 		if !proto.Equal(r.(proto.Message), ns) {
 			t.Fatalf("%v != %v", r, ns)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatalf("Test timeout")
 	}
 }

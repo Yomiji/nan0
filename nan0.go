@@ -7,6 +7,7 @@ DiscoveryService implements Stringer, io.Reader, io.Writer
 This API accepts and manages nanoservices
 */
 import (
+	"bufio"
 	"net"
 	"sync"
 	"time"
@@ -57,12 +58,13 @@ func (n Nan0) startServiceReceiver(identMap map[int]proto.Message, decryptKey *[
 			case <-n.readerShutdown:
 				return
 			default:
+				conn := bufio.NewReader(n.conn)
 				err := n.conn.SetReadDeadline(time.Now().Add(TCPTimeout))
 				checkError(err)
 
 				var newMsg proto.Message
 
-				newMsg, err = getMessageFromConnection(n.conn, identMap, decryptKey, hmacKey)
+				newMsg, err = getMessageFromConnection(conn, identMap, decryptKey, hmacKey)
 				if err != nil && newMsg == nil {
 					panic(err)
 				}
@@ -72,7 +74,7 @@ func (n Nan0) startServiceReceiver(identMap map[int]proto.Message, decryptKey *[
 					n.receiver <- newMsg
 				}
 			}
-			time.Sleep(10 * time.Microsecond)
+			time.Sleep(1 * time.Millisecond)
 		}
 	}
 }
@@ -103,7 +105,7 @@ func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActi
 					checkError(err)
 				}
 			default:
-				time.Sleep(10 * time.Microsecond)
+				time.Sleep(1 * time.Millisecond)
 			}
 		}
 	}
