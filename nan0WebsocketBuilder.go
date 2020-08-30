@@ -94,11 +94,10 @@ func wrapConnectionWs(connection *websocket.Conn, bb *baseBuilder) (nan0 NanoSer
 		receiver:       makeReceiveChannelFromBuilder(bb),
 		sender:         makeSendChannelFromBuilder(bb),
 		conn:           connection,
-		closed:         false,
+		closed:         make(chan struct{}),
 		writerShutdown: make(chan bool, 1),
 		readerShutdown: make(chan bool, 1),
 		closeComplete:  make(chan bool, 2),
-		rxTxWaitGroup:  new(sync.WaitGroup),
 	}
 
 	go nan0.startServiceReceiver(bb.messageIdentMap, nil, nil)
@@ -149,10 +148,10 @@ func buildWebsocketServer(wsb *WebsocketBuilder) (server *NanoServer, err error)
 	server = &NanoServer{
 		newConnections: make(chan NanoServiceWrapper),
 		connections:    make([]NanoServiceWrapper, MaxNanoCache),
-		closed:         false,
+		closed:         make(chan struct{}),
 		service:        wsb.ns,
-		rxTxWaitGroup:  new(sync.WaitGroup),
 		mdnsServer:     mdnsServer,
+		shutdownMux: new(sync.Mutex),
 	}
 
 	var upgrader = websocket.Upgrader{

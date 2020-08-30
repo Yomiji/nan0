@@ -22,11 +22,11 @@ type NanoServer struct {
 	// Connections array, which keeps connected clients
 	connections []NanoServiceWrapper
 	// The closed status
-	closed        bool
-	listener      net.Listener
-	wsServer      *http.Server
-	rxTxWaitGroup *sync.WaitGroup
-	mdnsServer    *mdns.Server
+	closed      chan struct{}
+	shutdownMux *sync.Mutex
+	listener    net.Listener
+	wsServer    *http.Server
+	mdnsServer  *mdns.Server
 }
 
 // Exposes the service delegate's serviceName property
@@ -60,7 +60,6 @@ func (server NanoServer) MdnsTag() string {
 
 // Get the channel which is fed new connections to the server
 func (server *NanoServer) GetConnections() <-chan NanoServiceWrapper {
-	server.rxTxWaitGroup.Wait()
 	if server.IsShutdown() {
 		return nil
 	}
@@ -69,7 +68,6 @@ func (server *NanoServer) GetConnections() <-chan NanoServiceWrapper {
 
 // Get all connections that this service has ever opened
 func (server *NanoServer) GetAllConnections() []NanoServiceWrapper {
-	server.rxTxWaitGroup.Wait()
 	if server.IsShutdown() {
 		return nil
 	}
@@ -78,10 +76,11 @@ func (server *NanoServer) GetAllConnections() []NanoServiceWrapper {
 
 // Puts a connection in the server
 func (server *NanoServer) AddConnection(conn NanoServiceWrapper) {
-	server.rxTxWaitGroup.Wait()
 	if server.IsShutdown() {
 		return
 	}
+	server.shutdownMux.Lock()
+	defer server.shutdownMux.Unlock()
 	server.connections = append(server.connections, conn)
 	server.newConnections <- conn
 }
@@ -94,20 +93,28 @@ func (server *NanoServer) resetConnections() (total int) {
 			conn.Close()
 		}
 	}
+	close(server.newConnections)
 	server.connections = make([]NanoServiceWrapper, MaxNanoCache)
 	return
 }
 
 func (server *NanoServer) IsShutdown() bool {
-	return server.closed
+	server.shutdownMux.Lock()
+	defer server.shutdownMux.Unlock()
+	select {
+	case <-server.closed:
+		return true
+	default:
+		return false
+	}
 }
 
 func (server *NanoServer) Shutdown() {
-	server.rxTxWaitGroup.Add(1)
-	defer server.rxTxWaitGroup.Done()
 	defer recoverPanic(func(e error) {
 		slog.Fail("In shutdown of server, %s: %v", server.GetServiceName(), e)
 	})
+	server.shutdownMux.Lock()
+	defer server.shutdownMux.Unlock()
 	server.resetConnections()
 
 	if server.listener != nil {
@@ -124,5 +131,5 @@ func (server *NanoServer) Shutdown() {
 		err := server.mdnsServer.Shutdown()
 		checkError(err)
 	}
-	server.closed = true
+	close(server.closed)
 }

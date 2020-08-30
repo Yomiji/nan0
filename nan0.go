@@ -9,7 +9,6 @@ This API accepts and manages nanoservices
 import (
 	"bufio"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/yomiji/slog"
@@ -31,15 +30,13 @@ type Nan0 struct {
 	// A connection maintained by this object
 	conn net.Conn
 	// The closed status
-	closed bool
+	closed chan struct{}
 	// Channel governing the reader service
 	readerShutdown chan bool
 	// Channel governing the writer service
 	writerShutdown chan bool
 	// Channel governing the shutdown completion
 	closeComplete chan bool
-
-	rxTxWaitGroup sync.WaitGroup
 }
 
 // Start the active receiver for this Nan0 connection. This enables the 'receiver' channel,
@@ -52,7 +49,7 @@ func (n Nan0) startServiceReceiver(identMap map[int]proto.Message, decryptKey *[
 		n.closeComplete <- true
 		slog.Debug("Shutting down service receiver for %v", n.ServiceName)
 	}()
-	if n.conn != nil && !n.closed {
+	if n.conn != nil && !n.IsClosed() {
 		for ; ; {
 			select {
 			case <-n.readerShutdown:
@@ -89,8 +86,8 @@ func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActi
 		n.closeComplete <- true
 		slog.Debug("Shutting down service sender for %v", n.ServiceName)
 	}()
-	if n.conn != nil && !n.closed {
-		for ; !n.IsClosed(); {
+	if n.conn != nil && !n.IsClosed() {
+		for ; ; {
 			select {
 			case <-n.writerShutdown:
 				return
@@ -113,8 +110,6 @@ func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActi
 
 // performs a close on everything except closing the connection
 func (n *Nan0) softClose() {
-	n.rxTxWaitGroup.Add(1)
-	defer n.rxTxWaitGroup.Done()
 	defer recoverPanic(func(e error) {
 		slog.Fail("Failed to close %s due to %v", n.ServiceName, e)
 	})
@@ -132,40 +127,44 @@ func (n *Nan0) softClose() {
 	// after goroutines are closed, close the read/write channels
 	close(n.receiver)
 	close(n.sender)
-	n.closed = true
+	close(n.closed)
 	slog.Debug("Connection %v is soft closed", n.ServiceName)
 }
 
 // Closes the open connection and terminates the goroutines associated with reading them
 func (n *Nan0) Close() {
-	n.rxTxWaitGroup.Add(1)
-	defer n.rxTxWaitGroup.Done()
 	defer recoverPanic(func(e error) {
 		slog.Fail("Failed to close %s due to %v", n.ServiceName, e)
 	})
+	if n.IsClosed() {
+		slog.Warn("%s already closed.", n.ServiceName)
+		return
+	}
 	n.softClose()
 	_ = n.conn.SetReadDeadline(time.Now())
 	_ = n.conn.Close()
-	n.closed = true
 	slog.Warn("Connection to %v is shut down!", n.ServiceName)
 }
 
 // Determine if this connection is closed
 func (n Nan0) IsClosed() bool {
-	return n.closed
+	select {
+	case <-n.closed:
+		return true
+	default:
+		return false
+	}
 }
 
 // Return a write-only channel that is used to send a protocol buffer message through this connection
 func (n Nan0) GetSender() chan<- interface{} {
 	// wait on the close to complete before returning the sender
-	n.rxTxWaitGroup.Wait()
 	return n.sender
 }
 
 // Returns a read-only channel that is used to receive a protocol buffer message returned through this connection
 func (n Nan0) GetReceiver() <-chan interface{} {
 	// wait on the close to complete before returning the receiver
-	n.rxTxWaitGroup.Wait()
 	return n.receiver
 }
 

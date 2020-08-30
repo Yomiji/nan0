@@ -20,11 +20,12 @@ var wsServer nan0.Server
 
 func StartTestServerThread(wsServer nan0.Server) {
 	go func() {
-		conn := <-wsServer.GetConnections()
-		select {
-		case msg,ok := <-conn.GetReceiver():
-			if ok {
-				conn.GetSender() <- msg
+		if conn,ok := <-wsServer.GetConnections(); ok {
+			select {
+			case msg,ok := <-conn.GetReceiver():
+				if ok {
+					conn.GetSender() <- msg
+				}
 			}
 		}
 	}()

@@ -2,7 +2,6 @@ package nan0
 
 import (
 	"errors"
-	"sync"
 	"time"
 
 	"github.com/yomiji/slog"
@@ -21,15 +20,13 @@ type WsNan0 struct {
 	// Messages placed on this channel will be sent
 	sender chan interface{}
 	// The closed status
-	closed bool
+	closed chan struct{}
 	// Channel governing the reader service
 	readerShutdown chan bool
 	// Channel governing the writer service
 	writerShutdown chan bool
 	// Channel governing the shutdown completion
 	closeComplete chan bool
-
-	rxTxWaitGroup *sync.WaitGroup
 
 	// A connection maintained by this object
 	conn *websocket.Conn
@@ -70,10 +67,9 @@ func (n WsNan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsAct
 func (n WsNan0) softClose() {
 	panic("this is a no-op")
 }
+
 // Closes the open connection and terminates the goroutines associated with reading them
 func (n WsNan0) Close() {
-	n.rxTxWaitGroup.Add(1)
-	defer n.rxTxWaitGroup.Done()
 	if n.IsClosed() {
 		return
 	}
@@ -91,24 +87,29 @@ func (n WsNan0) Close() {
 	_ = n.conn.Close()
 	slog.Debug("Dialed connection for server %v closed after shutdown signal received", n.ServiceName)
 	// after goroutines are closed, close the read/write channels
-	n.closed = true
+	close(n.receiver)
+	close(n.sender)
+	close(n.closed)
 	slog.Warn("Connection to %v is shut down!", n.ServiceName)
 }
 
 // Determine if this connection is closed
 func (n WsNan0) IsClosed() bool {
-	return n.closed
+	select {
+	case <-n.closed:
+		return true
+	default:
+		return false
+	}
 }
 
 // Return a write-only channel that is used to send a protocol buffer message through this connection
 func (n WsNan0) GetSender() chan<- interface{} {
-	n.rxTxWaitGroup.Wait()
 	return n.sender
 }
 
 // Returns a read-only channel that is used to receive a protocol buffer message returned through this connection
 func (n WsNan0) GetReceiver() <-chan interface{} {
-	n.rxTxWaitGroup.Wait()
 	return n.receiver
 }
 
@@ -134,7 +135,7 @@ func (n WsNan0) startServiceReceiver(identMap map[int]proto.Message, _, _ *[32]b
 	}()
 
 	if n.conn != nil && !n.IsClosed() {
-		for ; !n.IsClosed(); {
+		for ; ; {
 			select {
 			case <-n.readerShutdown:
 				return

@@ -47,7 +47,7 @@ func wrapConnectionTcp(connection net.Conn, bb *baseBuilder, encKey *[32]byte, h
 		receiver:       makeReceiveChannelFromBuilder(bb),
 		sender:         makeSendChannelFromBuilder(bb),
 		conn:           connection,
-		closed:         false,
+		closed:         make(chan struct{}),
 		writerShutdown: make(chan bool, 1),
 		readerShutdown: make(chan bool, 1),
 		closeComplete:  make(chan bool, 2),
@@ -124,10 +124,10 @@ func buildTcpServer(nsb *baseBuilder) (server *NanoServer, err error) {
 	server = &NanoServer{
 		newConnections: make(chan NanoServiceWrapper, MaxNanoCache),
 		connections:    make([]NanoServiceWrapper, MaxNanoCache),
-		closed:         false,
+		closed:         make(chan struct{}),
 		service:        nsb.ns,
-		rxTxWaitGroup:  new(sync.WaitGroup),
 		mdnsServer:     mdnsServer,
+		shutdownMux: new(sync.Mutex),
 	}
 	// start a listener
 	server.listener, err = nsb.ns.start()
@@ -139,6 +139,7 @@ func buildTcpServer(nsb *baseBuilder) (server *NanoServer, err error) {
 	if nsb.secure {
 		rsaPriv, rsaPub = genrsa.MakeKeys(2048)
 	}
+	slog.Info("Server %v started!", server.GetServiceName())
 
 	// handle shutdown separate from checking for clients
 	go func(listener net.Listener) {
@@ -211,7 +212,6 @@ func buildTcpServer(nsb *baseBuilder) (server *NanoServer, err error) {
 			server.AddConnection(newNano)
 		}
 	}(server.listener)
-	slog.Info("Server %v started!", server.GetServiceName())
 	return
 }
 
