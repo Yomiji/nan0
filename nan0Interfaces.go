@@ -8,7 +8,7 @@ import (
 type NanoServiceWrapper interface {
 	softClose()
 	startServiceSender(map[string]int, bool,*[32]byte,*[32]byte)
-	startServiceReceiver(map[int]proto.Message,*[32]byte,*[32]byte)
+	startServiceReceiver(RouteMap, map[int]proto.Message,*[32]byte,*[32]byte)
 	Closer
 	TxRx
 	Identity
@@ -71,4 +71,10 @@ type ConnectionHandler interface {
 // Generates discovery tags
 type DiscoverableService interface {
 	MdnsTag() string
+}
+
+type RouteMap map[string]ExecutableRoute
+
+type ExecutableRoute interface {
+	Execute(msg proto.Message, sender chan<- interface{})
 }

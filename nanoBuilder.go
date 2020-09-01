@@ -5,7 +5,6 @@ import (
 	"crypto/rsa"
 	"fmt"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/yomiji/genrsa"
@@ -53,7 +52,7 @@ func wrapConnectionTcp(connection net.Conn, bb *baseBuilder, encKey *[32]byte, h
 		closeComplete:  make(chan bool, 2),
 	}
 
-	go nan0.startServiceReceiver(bb.messageIdentMap, encKey, hmac)
+	go nan0.startServiceReceiver(bb.routes, bb.messageIdentMap, encKey, hmac)
 	go nan0.startServiceSender(bb.inverseIdentMap, bb.writeDeadlineActive, encKey, hmac)
 
 	return nan0, err
@@ -122,13 +121,16 @@ func buildTcpServer(nsb *baseBuilder) (server *NanoServer, err error) {
 	}
 
 	server = &NanoServer{
-		newConnections: make(chan NanoServiceWrapper, MaxNanoCache),
-		connections:    make([]NanoServiceWrapper, MaxNanoCache),
-		closed:         make(chan struct{}),
-		service:        nsb.ns,
-		mdnsServer:     mdnsServer,
-		shutdownMux: new(sync.Mutex),
+		connectionsList:   new(connList),
+		allConnectionsList: new(connList),
+		closed:            make(chan struct{}),
+		service:           nsb.ns,
+		mdnsServer:        mdnsServer,
 	}
+
+	server.connectionsList.init()
+	server.allConnectionsList.init()
+
 	// start a listener
 	server.listener, err = nsb.ns.start()
 
@@ -173,7 +175,7 @@ func buildTcpServer(nsb *baseBuilder) (server *NanoServer, err error) {
 				tempNano.GetSender() <- goprocrypt.RsaKeyToPbKey(*rsaPub)
 				select {
 				case encMsg := <-tempNano.GetReceiver():
-					if _,ok := encMsg.(*goprocrypt.EncryptedMessage); !ok {
+					if _, ok := encMsg.(*goprocrypt.EncryptedMessage); !ok {
 						slog.Fail("Security handshake intercepted wrong message format")
 						tempNano.Close()
 						continue

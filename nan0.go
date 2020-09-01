@@ -41,7 +41,7 @@ type Nan0 struct {
 
 // Start the active receiver for this Nan0 connection. This enables the 'receiver' channel,
 // constantly reads from the open connection and places the received message on receiver channel
-func (n Nan0) startServiceReceiver(identMap map[int]proto.Message, decryptKey *[32]byte, hmacKey *[32]byte) {
+func (n Nan0) startServiceReceiver(rmap RouteMap, identMap map[int]proto.Message, decryptKey *[32]byte, hmacKey *[32]byte) {
 	defer recoverPanic(func(e error) {
 		slog.Fail("Connection to %v receiver service error occurred: %v", n.GetServiceName(), e)
 	})()
@@ -67,8 +67,17 @@ func (n Nan0) startServiceReceiver(identMap map[int]proto.Message, decryptKey *[
 				}
 
 				if newMsg != nil {
-					//Send the message received to the awaiting receive buffer
-					n.receiver <- newMsg
+					if exec, ok := rmap[getProtobufMessageName(newMsg)]; ok {
+						//Execute any mapped routes
+						exec.Execute(newMsg, n.GetSender())
+					} else if exec,ok := rmap[DefaultRoute]; len(rmap) > 0 && ok {
+						//If no mapped routes, execute default route if defined
+						exec.Execute(newMsg, n.GetSender())
+					} else if len(rmap) == 0 {
+						//If no routes defined, send the message received to the receive buffer
+						// for manual processing
+						n.receiver <- newMsg
+					}
 				}
 			}
 			time.Sleep(1 * time.Millisecond)
@@ -125,7 +134,15 @@ func (n *Nan0) softClose() {
 	<-n.closeComplete
 	slog.Debug("Dialed connection for server %v closed after shutdown signal received", n.ServiceName)
 	// after goroutines are closed, close the read/write channels
+	go func() {
+		for range n.receiver {}
+		slog.Debug("Drained client %s receiver", n.ServiceName)
+	}()
 	close(n.receiver)
+	go func() {
+		for range n.sender {}
+		slog.Debug("Drained client %s sender", n.ServiceName)
+	}()
 	close(n.sender)
 	close(n.closed)
 	slog.Debug("Connection %v is soft closed", n.ServiceName)

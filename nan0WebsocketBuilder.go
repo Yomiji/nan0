@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"net/http"
 	"net/url"
-	"sync"
 
 	"github.com/yomiji/mdns"
 	"github.com/yomiji/slog"
@@ -100,14 +99,14 @@ func wrapConnectionWs(connection *websocket.Conn, bb *baseBuilder) (nan0 NanoSer
 		closeComplete:  make(chan bool, 2),
 	}
 
-	go nan0.startServiceReceiver(bb.messageIdentMap, nil, nil)
+	go nan0.startServiceReceiver(bb.routes, bb.messageIdentMap, nil, nil)
 	go nan0.startServiceSender(bb.inverseIdentMap, bb.writeDeadlineActive, nil, nil)
 
 	return nan0, err
 }
 
 func wrapWsClient(wsb *WebsocketBuilder) nanoClientFactory {
-	return func (bb *baseBuilder) (nan0 NanoServiceWrapper, err error) {
+	return func(bb *baseBuilder) (nan0 NanoServiceWrapper, err error) {
 		// setup a url to dial the websocket, hostname shouldn't include protocol
 		var u url.URL
 		var conn *websocket.Conn
@@ -146,13 +145,15 @@ func buildWebsocketServer(wsb *WebsocketBuilder) (server *NanoServer, err error)
 	}
 
 	server = &NanoServer{
-		newConnections: make(chan NanoServiceWrapper),
-		connections:    make([]NanoServiceWrapper, MaxNanoCache),
-		closed:         make(chan struct{}),
-		service:        wsb.ns,
-		mdnsServer:     mdnsServer,
-		shutdownMux: new(sync.Mutex),
+		service:           wsb.ns,
+		connectionsList:   new(connList),
+		allConnectionsList: new(connList),
+		closed:            make(chan struct{}),
+		mdnsServer:        mdnsServer,
 	}
+
+	server.connectionsList.init()
+	server.allConnectionsList.init()
 
 	var upgrader = websocket.Upgrader{
 		ReadBufferSize:  1024,
@@ -199,13 +200,6 @@ func buildWebsocketServer(wsb *WebsocketBuilder) (server *NanoServer, err error)
 	serveMux := http.NewServeMux()
 	serveMux.Handle(wsb.ns.GetUri(), handler)
 	srv := &http.Server{Handler: serveMux, Addr: composeTcpAddress("", wsb.ns.Port)}
-	srv.RegisterOnShutdown(func() {
-		for _, conn := range server.connections {
-			if conn != nil && !conn.IsClosed() {
-				conn.Close()
-			}
-		}
-	})
 
 	server.wsServer = srv
 	go func(serviceName string, wsb WebsocketBuilder) {

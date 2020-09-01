@@ -87,7 +87,15 @@ func (n WsNan0) Close() {
 	_ = n.conn.Close()
 	slog.Debug("Dialed connection for server %v closed after shutdown signal received", n.ServiceName)
 	// after goroutines are closed, close the read/write channels
+	go func() {
+		for range n.receiver {}
+		slog.Debug("Drained websocket client %s receiver", n.ServiceName)
+	}()
 	close(n.receiver)
+	go func() {
+		for range n.sender {}
+		slog.Debug("Drained websocket client %s sender", n.ServiceName)
+	}()
 	close(n.sender)
 	close(n.closed)
 	slog.Warn("Connection to %v is shut down!", n.ServiceName)
@@ -125,7 +133,7 @@ func (n WsNan0) Equals(other NanoServiceWrapper) bool {
 
 // Start the active receiver for this Nan0 connection. This enables the 'receiver' channel,
 // constantly reads from the open connection and places the received message on receiver channel
-func (n WsNan0) startServiceReceiver(identMap map[int]proto.Message, _, _ *[32]byte) {
+func (n WsNan0) startServiceReceiver(rmap RouteMap, identMap map[int]proto.Message, _, _ *[32]byte) {
 	defer recoverPanic(func(e error) {
 		slog.Fail("Connection to %v receiver service error occurred: %v", n.GetServiceName(), e)
 	})()
@@ -146,13 +154,22 @@ func (n WsNan0) startServiceReceiver(identMap map[int]proto.Message, _, _ *[32]b
 				var newMsg proto.Message
 
 				newMsg, err = getMessageFromConnectionWs(n.conn, identMap)
-				if err != nil && newMsg == nil {
+				if err != nil {
 					panic(err)
 				}
 
 				if newMsg != nil {
-					//Send the message received to the awaiting receive buffer
-					n.receiver <- newMsg
+					if exec, ok := rmap[getProtobufMessageName(newMsg)]; ok {
+						//Execute any mapped routes
+						exec.Execute(newMsg, n.GetSender())
+					} else if exec,ok := rmap[DefaultRoute]; len(rmap) > 0 && ok {
+						//If no mapped routes, execute default route if defined
+						exec.Execute(newMsg, n.GetSender())
+					} else if len(rmap) == 0 {
+						//If no routes defined, send the message received to the receive buffer
+						// for manual processing
+						n.receiver <- newMsg
+					}
 				}
 			}
 			time.Sleep(10 * time.Microsecond)

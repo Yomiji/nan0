@@ -57,6 +57,9 @@ var SizeWriter = func(size int) (bytes []byte) {
 *************************/
 
 func getProtobufMessageName(message proto.Message) string {
+	if message == nil {
+		return ""
+	}
 	return string(message.ProtoReflect().Descriptor().FullName())
 }
 
@@ -86,7 +89,13 @@ func recoverPanic(errfunc func(error)) func() {
 		return func() {
 			if e := recover(); e != nil {
 				// execute the abstract behavior
-				errfunc(e.(error))
+				if err,ok := e.(error); ok {
+					errfunc(err)
+				} else if err,ok := e.(string); ok {
+					errfunc(errors.New(err))
+				} else {
+					slog.Fail("err: %v", e)
+				}
 			}
 		}
 	} else {

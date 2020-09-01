@@ -2,12 +2,15 @@ package nan0
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/yomiji/goprocrypt/v2"
 	"google.golang.org/protobuf/proto"
 )
+
+const DefaultRoute = ""
 
 type baseBuilderOption func(bb *baseBuilder)
 
@@ -18,6 +21,7 @@ type baseBuilder struct {
 	writeDeadlineActive bool
 	messageIdentMap     map[int]proto.Message
 	inverseIdentMap     map[string]int
+	routes              RouteMap
 	serviceDiscovery    bool
 	sendBuffer          int
 	receiveBuffer       int
@@ -27,6 +31,7 @@ type baseBuilder struct {
 func (bb *baseBuilder) initialize(s *Service) {
 	bb.messageIdentMap = make(map[int]proto.Message)
 	bb.inverseIdentMap = make(map[string]int)
+	bb.routes = make(RouteMap)
 	bb.ns = s
 }
 
@@ -75,7 +80,7 @@ func AddMessageIdentities(messageIdents ...proto.Message) baseBuilderOption {
 	}
 }
 
-// Adds a single identity-type object that will be cloned to either send or receive messages.
+// AddMessageIdentity adds a single identity-type object that will be cloned to either send or receive messages.
 // All protocol buffers you intend to send or receive should be registered with this method
 // or the transmissions will fail
 func AddMessageIdentity(messageIdent proto.Message) baseBuilderOption {
@@ -84,11 +89,28 @@ func AddMessageIdentity(messageIdent proto.Message) baseBuilderOption {
 	}
 }
 
+// Route enables service or client to respond to receipt of a message with the given ExecutableRoute
+//  NOTE: route must not be nil
+func Route(messageIdent proto.Message, route ExecutableRoute) baseBuilderOption{
+	return func(bb *baseBuilder) {
+		addSingleIdentity(messageIdent, bb)
+		addRoute(messageIdent, route, bb)
+	}
+}
+
 func addSingleIdentity(messageIdent proto.Message, bb *baseBuilder) {
 	t := getProtobufMessageName(messageIdent)
 	i := int(hashString(t))
 	bb.messageIdentMap[i] = messageIdent
 	bb.inverseIdentMap[t] = i
+}
+
+func addRoute(messageIdent proto.Message, route ExecutableRoute, bb *baseBuilder) {
+	if route == nil {
+		panic(errors.New("ExecutableRoute cannot be nil"))
+	}
+	t := getProtobufMessageName(messageIdent)
+	bb.routes[t] = route
 }
 
 // Part of the NanoBuilder chain, sets the number of messages that can be simultaneously placed on the send buffer

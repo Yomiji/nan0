@@ -1,45 +1,14 @@
 package nan0_tests
 
 import (
-	"os"
-	"strconv"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/golang/protobuf/ptypes/any"
 	"github.com/yomiji/nan0/v2"
-	"github.com/yomiji/slog"
 	"google.golang.org/protobuf/proto"
 )
-
-var nsDefaultPort int32 = 2324
-var wsDefaultPort int32 = 8080
-
-
-var wsServer nan0.Server
-
-func StartTestServerThread(wsServer nan0.Server) {
-	go func() {
-		if conn,ok := <-wsServer.GetConnections(); ok {
-			select {
-			case msg,ok := <-conn.GetReceiver():
-				if ok {
-					conn.GetSender() <- msg
-				}
-			}
-		}
-	}()
-}
-
-func TestMain(m *testing.M) {
-	slog.ToggleLogging(true, true, true, true)
-	//slog.ToggleLineNumberPrinting(true, true, true, false)
-	//slog.FilterSource("nan0Util.go")
-	//slog.FilterSource("nan0.go")
-	//slog.FilterSource("encryption.go")
-	//slog.FilterSource("nanoBuilder.go")
-	os.Exit(m.Run())
-}
 
 func TestNan0_Close(t *testing.T) {
 	ns := &nan0.Service{
@@ -76,7 +45,6 @@ func TestNan0_Close(t *testing.T) {
 		t.Fatal(" \t\tTest Failed, n.closed != true after closed")
 	}
 }
-
 func TestNan0_GetReceiver(t *testing.T) {
 	// create the service configuration
 	serviceConf := &nan0.Service{
@@ -100,7 +68,7 @@ func TestNan0_GetReceiver(t *testing.T) {
 	go func() {
 		conn := <-server.GetConnections()
 		select {
-		case msg,ok := <-conn.GetReceiver():
+		case msg, ok := <-conn.GetReceiver():
 			if ok {
 				conn.GetSender() <- msg
 			}
@@ -128,7 +96,6 @@ func TestNan0_GetReceiver(t *testing.T) {
 		t.Fatalf(" \t\tTest Failed, \n\t\tsent %v, \n\t\treceived: %v\n", serviceConf, waitingVal)
 	}
 }
-
 func TestNan0_FailWithWrongType(t *testing.T) {
 	ns := &nan0.Service{
 		ServiceName: "TestService",
@@ -166,7 +133,6 @@ func TestNan0_FailWithWrongType(t *testing.T) {
 		t.Log("Passed!")
 	}
 }
-
 func TestNan0_MixedOrderMessageIdent(t *testing.T) {
 	ns := &nan0.Service{
 		ServiceName: "TestService",
@@ -190,7 +156,6 @@ func TestNan0_MixedOrderMessageIdent(t *testing.T) {
 
 	defer server.Shutdown()
 	StartTestServerThread(server)
-
 
 	builder2 := ns.NewNanoBuilder()
 	n, err := builder2.BuildNanoClient(
@@ -219,54 +184,115 @@ func TestNan0_MixedOrderMessageIdent(t *testing.T) {
 		t.Fatal("\t\tTest Failed, Timeout")
 	}
 }
-
-func TestWebsocketClient(t *testing.T) {
-	ns := &nan0.Service{
+func TestNan0_RepeatClient(t *testing.T) {
+	// create the service configuration
+	serviceConf := &nan0.Service{
 		ServiceName: "TestService",
-		Port:        wsDefaultPort,
-		HostName:    "localhost",
+		Port:        nsDefaultPort,
+		HostName:    "127.0.0.1",
 		ServiceType: "Test",
 		StartTime:   time.Now().Unix(),
-		Uri:         "/",
 	}
-	var err error
-	wsBuilder := ns.NewWebsocketBuilder()
-	wsServer, _ = wsBuilder.BuildWebsocketServer(
-		nan0.AddMessageIdentity(proto.Clone(new(nan0.Service))),
-		nan0.AddOrigins("localhost:"+strconv.Itoa(int(wsDefaultPort))),
-	)
-
-	defer wsServer.Shutdown()
-	StartTestServerThread(wsServer)
-
-
-	ns2 := &nan0.Service{
-		ServiceName: "TestService2",
-		Port:        wsDefaultPort,
-		HostName:    "localhost",
-		ServiceType: "Test",
-		StartTime:   time.Now().Unix(),
-		Uri:         "/",
-	}
-
-	receiver, err := ns2.NewWebsocketBuilder().
-		BuildWebsocketClient(nan0.AddMessageIdentity(new(nan0.Service)))
+	// message types need to be registered before used so add a new one
+	server, err := serviceConf.NewNanoBuilder().
+		BuildNanoServer(
+			nan0.AddMessageIdentity(new(nan0.Service)),
+		)
 	if err != nil {
-		t.Fatalf("Failed to establish client connection")
+		t.Fatalf(" \t\tTest Failed, error: %v\n", err)
 	}
-	defer receiver.Close()
-
-	receiver.GetSender() <- ns2
-
-	select {
-	case val := <-receiver.GetReceiver():
-		if _, ok := val.(*nan0.Service); !ok {
-			t.Fatal("\t\tTest Failed, Nan0 service type was not returned from ws")
+	// remember to ALWAYS shut your server down when finished
+	defer server.Shutdown()
+	// This server is configured to read a value and echo that value back out
+	go func() {
+		for conn := range server.GetConnections() {
+			select {
+			case msg, ok := <-conn.GetReceiver():
+				if ok {
+					conn.GetSender() <- msg
+				}
+			}
 		}
-		if val.(*nan0.Service).HostName != ns2.HostName {
-			t.Fatal("\t\tTest Failed, Values not validated")
+	}()
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		client, err := serviceConf.NewNanoBuilder().
+			BuildNanoClient(
+				nan0.AddMessageIdentity(new(nan0.Service)),
+			)
+		if err != nil {
+			t.Fatal("\t\tTest Failed, Nan0 failed to connect to service")
 		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("\t\tTest Failed, Timeout")
+		sender := client.GetSender()
+		receiver := client.GetReceiver()
+		sender <- serviceConf
+		select {
+		case waitingVal := <-receiver:
+			if waitingVal.(*nan0.Service).String() != serviceConf.String() {
+				t.Fatalf(" \t\tTest Failed, \n\t\tsent %v, \n\t\treceived: %v\n", serviceConf, waitingVal)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("Test timeout")
+		}
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		client, err := serviceConf.NewNanoBuilder().
+			BuildNanoClient(
+				nan0.AddMessageIdentity(new(nan0.Service)),
+			)
+		if err != nil {
+			t.Fatal("\t\tTest Failed, Nan0 failed to connect to service")
+		}
+		sender := client.GetSender()
+		receiver := client.GetReceiver()
+		sender <- serviceConf
+		select {
+		case waitingVal := <-receiver:
+			if waitingVal.(*nan0.Service).String() != serviceConf.String() {
+				t.Fatalf(" \t\tTest Failed, \n\t\tsent %v, \n\t\treceived: %v\n", serviceConf, waitingVal)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("Test timeout")
+		}
+	}()
+	wg.Wait()
+}
+func TestNan0_GetAllClients(t *testing.T) {
+	// create the service configuration
+	serviceConf := &nan0.Service{
+		ServiceName: "TestService",
+		Port:        nsDefaultPort,
+		HostName:    "127.0.0.1",
+		ServiceType: "Test",
+		StartTime:   time.Now().Unix(),
+	}
+	// message types need to be registered before used so add a new one
+	server, err := serviceConf.NewNanoBuilder().
+		BuildNanoServer(
+			nan0.AddMessageIdentity(new(nan0.Service)),
+			nan0.Route(nil, TestRoute{}),
+		)
+	if err != nil {
+		t.Fatalf(" \t\tTest Failed, error: %v\n", err)
+	}
+	// remember to ALWAYS shut your server down when finished
+	defer server.Shutdown()
+
+	client, err := serviceConf.NewNanoBuilder().
+		BuildNanoClient(
+			nan0.AddMessageIdentity(new(nan0.Service)),
+		)
+	if err != nil {
+		t.Fatal("\t\tTest Failed, Nan0 failed to connect to service")
+	}
+	client.GetSender() <- serviceConf
+	<-client.GetReceiver()
+	if n := len(server.GetAllConnections()); n != 1 {
+		t.Fatalf("Expected 1 client, got %d", n)
 	}
 }
