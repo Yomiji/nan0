@@ -27,65 +27,45 @@ transport protocols, message handshaking and so forth. Here are the primary uses
 ```
 * The **Service** type defines the actual nanoservices that you can create to serve as a client OR server. In order to quickly establish a Service, just instantiate a Service object and create a builder for it. You will still need to handle passing data to the connections that are established via the returned object like so:
 ```go
-    package main
-          
-    import (
-          "github.com/yomiji/nan0/v2"
-          "time"
-          "fmt"
-          "google.golang.org/protobuf/proto"
-      )
-      
-    func TestNan0_GetReceiver(t *testing.T) {
-        // create the service configuration
+        // TestRoute echoes received message
+        type TestRoute struct{}
+        
+        func (TestRoute) Execute(msg proto.Message, sender chan<- interface{}) {
+            sender <- msg
+        }
+        //...
         serviceConf := &nan0.Service{
             ServiceName: "TestService",
-            Port:        nsDefaultPort,
-            HostName:    "127.0.0.1",
+            Port:        8080,
+            HostName:    "localhost",
             ServiceType: "Test",
             StartTime:   time.Now().Unix(),
         }
-        // message types need to be registered before used so add a new one
         server, err := serviceConf.NewNanoBuilder().
             BuildNanoServer(
-                nan0.AddMessageIdentity(new(nan0.Service)),
+                nan0.Route(new(protobufMessage), new(TestRoute)),
             )
         if err != nil {
-            t.Fatalf(" \t\tTest Failed, error: %v\n", err)
+            //..
         }
         // remember to ALWAYS shut your server down when finished
         defer server.Shutdown()
-        // This server is configured to read a value and echo that value back out
-        go func() {
-            conn := <-server.GetConnections()
-            select {
-            case msg,ok := <-conn.GetReceiver():
-                if ok {
-                    conn.GetSender() <- msg
-                }
-            }
-        }()
     
-        // server and clients can use the same builder with different finalizer methods
-        client, err := serviceConf.NewNanoBuilder().
+        client, err := clientConf.NewNanoBuilder().
             BuildNanoClient(
-                nan0.AddMessageIdentity(new(nan0.Service)),
+                nan0.AddMessageIdentity(new(protobufMessage)),
             )
         if err != nil {
-            t.Fatal("\t\tTest Failed, Nan0 failed to connect to service")
+            //...
         }
         // ALWAYS close your client
         defer client.Close()
         sender := client.GetSender()
         receiver := client.GetReceiver()
-        // senders and receivers naturally block, unless you set a buffer value
-        // they can also be used with 'select' statements for non-blocking communication
-        sender <- serviceConf
-        waitingVal := <-receiver
+        
+        sender <- message
+        echoedProtobufMessage := <-receiver
     
-        if waitingVal.(*nan0.Service).String() != serviceConf.String() {
-            t.Fatalf(" \t\tTest Failed, \n\t\tsent %v, \n\t\treceived: %v\n", serviceConf, waitingVal)
-        }
     }
 ````
 

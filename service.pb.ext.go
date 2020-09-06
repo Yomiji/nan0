@@ -3,15 +3,18 @@ package nan0
 import (
 	"net"
 	"strings"
+	"time"
 )
 
 /*******************
  	Service API
  *******************/
+const defaultTxRxIdleDuration = 5 * time.Minute
 
 func (ns *Service) NewNanoBuilder() *NanoBuilder {
 	nsb := new(NanoBuilder)
 	nsb.baseBuilder = new(baseBuilder)
+	nsb.txRxIdleDuration = defaultTxRxIdleDuration
 	nsb.initialize(ns)
 	return nsb
 }

@@ -3,8 +3,8 @@ package nan0
 import (
 	"context"
 	"crypto/rsa"
-	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/yomiji/genrsa"
@@ -13,24 +13,41 @@ import (
 	"github.com/yomiji/slog"
 )
 
+const defaultPurgeDuration = 1 * time.Minute
+const defaultMaxConnections = 50
+
+type nanoBuilderOption func(*NanoBuilder)
+
 type NanoBuilder struct {
 	*baseBuilder
 }
+func (nsb *NanoBuilder) buildOpts(opts []interface{}) {
+	for _, opt := range opts {
+		switch ot := opt.(type) {
+		case baseBuilderOption:
+			ot(nsb.baseBuilder)
+		case nanoBuilderOption:
+			ot(nsb)
+		case func(builder *baseBuilder):
+			ot(nsb.baseBuilder)
+		}
+	}
+}
 
 // Establish a connection creating a first-class Nan0 connection which will communicate with the server
-func (nsb *NanoBuilder) BuildNanoClient(opts ...baseBuilderOption) (nan0 NanoServiceWrapper, err error) {
-	nsb.build(opts...)
+func (nsb *NanoBuilder) BuildNanoClient(opts ...interface{}) (nan0 NanoServiceWrapper, err error) {
+	nsb.buildOpts(opts)
 	return buildTcpClient(nsb.baseBuilder)
 }
 
-func (nsb *NanoBuilder) BuildNanoDNS(ctx context.Context, strategy clientDNSStrategy, opts ...baseBuilderOption) ClientDNSFactory {
-	nsb.build(opts...)
+func (nsb *NanoBuilder) BuildNanoDNS(ctx context.Context, strategy clientDNSStrategy, opts ...interface{}) ClientDNSFactory {
+	nsb.buildOpts(opts)
 	return buildDNS(ctx, nsb.baseBuilder, buildTcpClient, strategy)
 }
 
 // Build a wrapped server instance
-func (nsb *NanoBuilder) BuildNanoServer(opts ...baseBuilderOption) (*NanoServer, error) {
-	nsb.build(opts...)
+func (nsb *NanoBuilder) BuildNanoServer(opts ...interface{}) (*NanoServer, error) {
+	nsb.buildOpts(opts)
 	return buildTcpServer(nsb.baseBuilder)
 }
 
@@ -47,13 +64,26 @@ func wrapConnectionTcp(connection net.Conn, bb *baseBuilder, encKey *[32]byte, h
 		sender:         makeSendChannelFromBuilder(bb),
 		conn:           connection,
 		closed:         make(chan struct{}),
-		writerShutdown: make(chan bool, 1),
-		readerShutdown: make(chan bool, 1),
-		closeComplete:  make(chan bool, 2),
+		readerShutdown: make(chan struct{}, 1),
+		writerShutdown: make(chan struct{}, 1),
+		closeComplete:  make(chan struct{}, 2),
+		lastTxRx:       time.Now(),
+		closeMux:       new(sync.Mutex),
 	}
 
 	go nan0.startServiceReceiver(bb.routes, bb.messageIdentMap, encKey, hmac)
 	go nan0.startServiceSender(bb.inverseIdentMap, bb.writeDeadlineActive, encKey, hmac)
+	go CheckAndDoWithDuration(func() bool {
+		if bb.txRxIdleDuration <= 0 {
+			return nan0.LastComm().Add(defaultTxRxIdleDuration).After(time.Now())
+		}
+		return nan0.LastComm().Add(bb.txRxIdleDuration).After(time.Now())
+	}, func() {
+		slog.Debug("[%s] Auto Close Triggered (idle: %v) (lastcom: %v)",
+			nan0.GetServiceName(), bb.txRxIdleDuration, nan0.LastComm())
+		nan0.Close()
+	}, bb.txRxIdleDuration)
+
 
 	return nan0, err
 }
@@ -96,9 +126,6 @@ func buildTcpClient(sec *baseBuilder) (nan0 NanoServiceWrapper, err error) {
 			checkError(err)
 			tempNano.GetSender() <- encMsg
 			tempNano.softClose()
-		case <-time.After(TCPTimeout):
-			tempNano.Close()
-			checkError(fmt.Errorf("client timeout while security handshaking"))
 		}
 		return wrapConnectionTcp(conn, sec, encKey, hmac)
 	} else {
@@ -121,100 +148,129 @@ func buildTcpServer(nsb *baseBuilder) (server *NanoServer, err error) {
 	}
 
 	server = &NanoServer{
-		connectionsList:   new(connList),
+		connectionsList:    new(connList),
 		allConnectionsList: new(connList),
-		closed:            make(chan struct{}),
-		service:           nsb.ns,
-		mdnsServer:        mdnsServer,
+		closed:             make(chan struct{}),
+		service:            nsb.ns,
+		mdnsServer:         mdnsServer,
 	}
 
 	server.connectionsList.init()
 	server.allConnectionsList.init()
 
+	if nsb.purgeConnections <= 0 {
+		go func() {
+			purgeLogic(defaultPurgeDuration, server, nsb)
+		}()
+	} else {
+		go func() {
+			purgeLogic(nsb.purgeConnections, server, nsb)
+		}()
+	}
+
+	if nsb.maxServerConnections <= 0 {
+		nsb.maxServerConnections = defaultMaxConnections
+	}
+
 	// start a listener
 	server.listener, err = nsb.ns.start()
 
 	checkError(err)
+	slog.Info("Server %v started!", server.GetServiceName())
+
+	// handle shutdown separate from checking for clients
+	go func(listener net.Listener) {
+		startServerListening(listener, server, nsb)
+	}(server.listener)
+	return
+}
+
+func startServerListening(listener net.Listener, server *NanoServer, nsb *baseBuilder) {
 	//make rsa keys
 	var rsaPriv *rsa.PrivateKey
 	var rsaPub *rsa.PublicKey
 	if nsb.secure {
 		rsaPriv, rsaPub = genrsa.MakeKeys(2048)
 	}
-	slog.Info("Server %v started!", server.GetServiceName())
+	for ; ; {
+		// every time we get a new client
+		conn, err := listener.Accept()
+		if err != nil {
+			slog.Warn("Listener for %v no longer accepting connections.", server.service.ServiceName)
+			return
+		}
 
-	// handle shutdown separate from checking for clients
-	go func(listener net.Listener) {
-		for ; ; {
-			// every time we get a new client
-			conn, err := listener.Accept()
+		if server.ActiveConnectionsCount() == nsb.maxServerConnections {
+			return
+		}
+		var newNano NanoServiceWrapper
+		if nsb.secure {
+			/** Handshake: Server side
+			// 0. generate all keys (rsa)
+			// 1. begin insecure connection
+			// 2. send public key in clear
+			// 3. receive encrypted message with client public key and secrets
+			// 4. decrypt message set secureConfigs
+			// 5. wrap secure connection
+			*/
+			// create a temporary insecure nan0 connection to the client
+			slog.Debug("Accepting secure connection...")
+			tempNano, err := wrapConnectionTcp(conn, nsb, nil, nil)
 			if err != nil {
-				slog.Warn("Listener for %v no longer accepting connections.", server.service.ServiceName)
-				return
+				slog.Warn("Connection dropped due to %v", err)
+				continue
 			}
-
-			var newNano NanoServiceWrapper
-			if nsb.secure {
-				/** Handshake: Server side
-				// 0. generate all keys (rsa)
-				// 1. begin insecure connection
-				// 2. send public key in clear
-				// 3. receive encrypted message with client public key and secrets
-				// 4. decrypt message set secureConfigs
-				// 5. wrap secure connection
-				*/
-				// create a temporary insecure nan0 connection to the client
-				slog.Debug("Accepting secure connection...")
-				tempNano, err := wrapConnectionTcp(conn, nsb, nil, nil)
-				if err != nil {
-					slog.Warn("Connection dropped due to %v", err)
-					continue
-				}
-				var encKey = &[32]byte{}
-				var hmac = &[32]byte{}
-				tempNano.GetSender() <- goprocrypt.RsaKeyToPbKey(*rsaPub)
-				select {
-				case encMsg := <-tempNano.GetReceiver():
-					if _, ok := encMsg.(*goprocrypt.EncryptedMessage); !ok {
-						slog.Fail("Security handshake intercepted wrong message format")
-						tempNano.Close()
-						continue
-					}
-					apiKey := new(ApiKey)
-					err := goprocrypt.Decrypt(nil, encMsg.(*goprocrypt.EncryptedMessage), rsaPriv, apiKey)
-					if err != nil {
-						slog.Fail("Security handshake failure: %v", err)
-						tempNano.Close()
-						continue
-					}
-					copy(encKey[:], apiKey.EncKey)
-					copy(hmac[:], apiKey.HmacKey)
-					slog.Debug("End security handshake successfully")
-				case <-time.After(TCPTimeout):
-					slog.Fail("Security handshake timeout")
+			var encKey = &[32]byte{}
+			var hmac = &[32]byte{}
+			tempNano.GetSender() <- goprocrypt.RsaKeyToPbKey(*rsaPub)
+			select {
+			case encMsg := <-tempNano.GetReceiver():
+				tempNano.softClose()
+				if _, ok := encMsg.(*goprocrypt.EncryptedMessage); !ok {
+					slog.Fail("Security handshake intercepted wrong message format")
 					tempNano.Close()
 					continue
 				}
-				tempNano.softClose()
-				// begin all communications with encryption
-				newNano, err = wrapConnectionTcp(conn, nsb, encKey, hmac)
+				apiKey := new(ApiKey)
+				err := goprocrypt.Decrypt(nil, encMsg.(*goprocrypt.EncryptedMessage), rsaPriv, apiKey)
 				if err != nil {
-					slog.Warn("Connection dropped due to %v", err)
+					slog.Fail("Security handshake failure: %v", err)
+					tempNano.Close()
 					continue
 				}
-			} else {
-				// create a new nan0 connection to the client
-				newNano, err = wrapConnectionTcp(conn, nsb, nil, nil)
-				if err != nil {
-					slog.Warn("Connection dropped due to %v", err)
-					continue
-				}
+				copy(encKey[:], apiKey.EncKey)
+				copy(hmac[:], apiKey.HmacKey)
+				slog.Debug("End security handshake successfully")
 			}
-			// place the new connection on the channel and in the connections cache
-			server.AddConnection(newNano)
+			// begin all communications with encryption
+			newNano, err = wrapConnectionTcp(conn, nsb, encKey, hmac)
+			if err != nil {
+				slog.Warn("Connection dropped due to %v", err)
+				continue
+			}
+		} else {
+			// create a new nan0 connection to the client
+			newNano, err = wrapConnectionTcp(conn, nsb, nil, nil)
+			if err != nil {
+				slog.Warn("Connection dropped due to %v", err)
+				continue
+			}
 		}
-	}(server.listener)
-	return
+		// place the new connection on the channel and in the connections cache
+		server.AddConnection(newNano)
+	}
+}
+
+func purgeLogic(duration time.Duration, server *NanoServer, bb *baseBuilder) {
+	ticker := time.NewTicker(duration)
+	defer ticker.Stop()
+	for !server.IsShutdown() {
+		<-ticker.C
+		server.allConnectionsList.purgeClosedConnections()
+		if server.ActiveConnectionsCount() == bb.maxServerConnections {
+			slog.Warn("Max Connections Reached")
+		}
+	}
 }
 
 func makeMdnsServerTcp(nsb *baseBuilder) (s *mdns.Server, err error) {

@@ -2,6 +2,7 @@ package nan0
 
 import (
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/yomiji/slog"
@@ -27,9 +28,16 @@ type WsNan0 struct {
 	writerShutdown chan bool
 	// Channel governing the shutdown completion
 	closeComplete chan bool
-
+	// Last communication time
+	lastTxRx time.Time
 	// A connection maintained by this object
 	conn *websocket.Conn
+	// close mutex
+	closeMux *sync.Mutex
+}
+
+func (n WsNan0) LastComm() time.Time {
+	return n.lastTxRx
 }
 
 // Start the active sender for this Nan0 connection. This enables the 'sender' channel and allows the user to send
@@ -57,6 +65,7 @@ func (n WsNan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsAct
 				if err != nil {
 					checkError(err)
 				}
+				n.lastTxRx = time.Now()
 			default:
 				time.Sleep(10 * time.Microsecond)
 			}
@@ -70,35 +79,47 @@ func (n WsNan0) softClose() {
 
 // Closes the open connection and terminates the goroutines associated with reading them
 func (n WsNan0) Close() {
-	if n.IsClosed() {
-		return
-	}
 	defer recoverPanic(func(e error) {
 		slog.Fail("Failed to close %s due to %v", n.ServiceName, e)
 	})
+	n.closeMux.Lock()
+	defer n.closeMux.Unlock()
+	if n.IsClosed() {
+		return
+	}
 
-	n.readerShutdown <- true
-	slog.Debug("Reader stream for Nan0 server '%v' shutdown signal sent", n.ServiceName)
-	n.writerShutdown <- true
-	_ = n.conn.SetReadDeadline(time.Now())
-	slog.Debug("Writer stream for Nan0 server '%v' shutdown signal sent", n.ServiceName)
-	<-n.closeComplete
-	<-n.closeComplete
-	_ = n.conn.Close()
+	go func() {
+		n.readerShutdown <- true
+		slog.Debug("Reader stream for Nan0 server '%v' shutdown signal sent", n.ServiceName)
+		n.writerShutdown <- true
+		_ = n.conn.SetReadDeadline(time.Now())
+		slog.Debug("Writer stream for Nan0 server '%v' shutdown signal sent", n.ServiceName)
+	}()
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+	select {
+	case <-n.closeComplete:
+	case <-ticker.C:
+	}
+	select {
+	case <-n.closeComplete:
+	case <-ticker.C:
+	}
 	slog.Debug("Dialed connection for server %v closed after shutdown signal received", n.ServiceName)
 	// after goroutines are closed, close the read/write channels
 	go func() {
 		for range n.receiver {}
-		slog.Debug("Drained websocket client %s receiver", n.ServiceName)
+		slog.Debug("Drained client %s receiver", n.ServiceName)
 	}()
 	close(n.receiver)
 	go func() {
 		for range n.sender {}
-		slog.Debug("Drained websocket client %s sender", n.ServiceName)
+		slog.Debug("Drained client %s sender", n.ServiceName)
 	}()
 	close(n.sender)
+	_ = n.conn.Close()
 	close(n.closed)
-	slog.Warn("Connection to %v is shut down!", n.ServiceName)
+	slog.Debug("Connection %v is closed", n.ServiceName)
 }
 
 // Determine if this connection is closed
@@ -170,6 +191,7 @@ func (n WsNan0) startServiceReceiver(rmap RouteMap, identMap map[int]proto.Messa
 						// for manual processing
 						n.receiver <- newMsg
 					}
+					n.lastTxRx = time.Now()
 				}
 			}
 			time.Sleep(10 * time.Microsecond)

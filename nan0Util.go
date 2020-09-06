@@ -16,9 +16,6 @@ import (
 	Service Params
  *******************/
 
-// The max queued connections for NanoServer handling, used with ListenTCP()
-var MaxNanoCache = 50
-
 // The timeout for TCP Writers and server connections
 var TCPTimeout = 10 * time.Second
 
@@ -55,6 +52,54 @@ var SizeWriter = func(size int) (bytes []byte) {
 /*************************
 	Helper Functions
 *************************/
+
+func AwaitNSignals(c chan struct{}, n int) {
+	defer close(c)
+	for i := n; i > 0; i-- {
+		<-c
+	}
+	drainSignalChan(c)
+}
+
+func DoAfterNSignals(c chan struct{}, n int, action func()) {
+	go func() {
+		defer action()
+		AwaitNSignals(c, n)
+	}()
+}
+
+func DoAfterFirstSignal(c chan struct{}, action func()) {
+	go func() {
+		defer close(c)
+		defer action()
+		<-c
+		drainSignalChan(c)
+	}()
+}
+
+func CheckAndDo(awaitedCondition func() bool, do func()) {
+	CheckAndDoWithDuration(awaitedCondition, do, 0)
+}
+
+func CheckAndDoWithDuration(awaitedCondition func() bool, do func(), after time.Duration) {
+	if after == 0 {
+		after = 333 * time.Microsecond
+	}
+	timer := time.NewTimer(after)
+	defer timer.Stop()
+	defer do()
+	for awaitedCondition() {
+		<-timer.C
+	}
+}
+
+func drainSignalChan(c <-chan struct{}) {
+	go func() {for _ = range c{}}()
+}
+
+func drainTxRxChan(c <-chan interface{}) {
+	go func() {for _ = range c{}}()
+}
 
 func getProtobufMessageName(message proto.Message) string {
 	if message == nil {

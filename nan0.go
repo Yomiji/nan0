@@ -8,7 +8,9 @@ This API accepts and manages nanoservices
 */
 import (
 	"bufio"
+	"errors"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/yomiji/slog"
@@ -32,28 +34,34 @@ type Nan0 struct {
 	// The closed status
 	closed chan struct{}
 	// Channel governing the reader service
-	readerShutdown chan bool
+	readerShutdown chan struct{}
 	// Channel governing the writer service
-	writerShutdown chan bool
+	writerShutdown chan struct{}
 	// Channel governing the shutdown completion
-	closeComplete chan bool
+	closeComplete chan struct{}
+	// Last successful transmission time
+	lastTxRx time.Time
+	// mutex
+	closeMux *sync.Mutex
+}
+
+func (n Nan0) LastComm() time.Time {
+	return n.lastTxRx
 }
 
 // Start the active receiver for this Nan0 connection. This enables the 'receiver' channel,
 // constantly reads from the open connection and places the received message on receiver channel
 func (n Nan0) startServiceReceiver(rmap RouteMap, identMap map[int]proto.Message, decryptKey *[32]byte, hmacKey *[32]byte) {
 	defer recoverPanic(func(e error) {
-		slog.Fail("Connection to %v receiver service error occurred: %v", n.GetServiceName(), e)
+		close(n.receiver)
+		n.closeComplete <- struct{}{}
+		slog.Warn("Connection to %v receiver service terminated: %v", n.GetServiceName(), e)
 	})()
-	defer func() {
-		n.closeComplete <- true
-		slog.Debug("Shutting down service receiver for %v", n.ServiceName)
-	}()
 	if n.conn != nil && !n.IsClosed() {
-		for ; ; {
+		for {
 			select {
 			case <-n.readerShutdown:
-				return
+				panic(errors.New("reader shutdown"))
 			default:
 				conn := bufio.NewReader(n.conn)
 				err := n.conn.SetReadDeadline(time.Now().Add(TCPTimeout))
@@ -70,14 +78,15 @@ func (n Nan0) startServiceReceiver(rmap RouteMap, identMap map[int]proto.Message
 					if exec, ok := rmap[getProtobufMessageName(newMsg)]; ok {
 						//Execute any mapped routes
 						exec.Execute(newMsg, n.GetSender())
-					} else if exec,ok := rmap[DefaultRoute]; len(rmap) > 0 && ok {
+					} else if exec, ok := rmap[DefaultRoute]; len(rmap) > 0 && ok {
 						//If no mapped routes, execute default route if defined
 						exec.Execute(newMsg, n.GetSender())
-					} else if len(rmap) == 0 {
+					} else {
 						//If no routes defined, send the message received to the receive buffer
 						// for manual processing
 						n.receiver <- newMsg
 					}
+					n.lastTxRx = time.Now()
 				}
 			}
 			time.Sleep(1 * time.Millisecond)
@@ -89,17 +98,15 @@ func (n Nan0) startServiceReceiver(rmap RouteMap, identMap map[int]proto.Message
 // protocol buffer messages to the server
 func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActive bool, encryptKey *[32]byte, hmacKey *[32]byte) {
 	defer recoverPanic(func(e error) {
-		slog.Fail("Connection to %v sender service error occurred: %v", n.GetServiceName(), e)
+		close(n.sender)
+		n.closeComplete <- struct{}{}
+		slog.Warn("Connection to %v sender service terminated: %v", n.GetServiceName(), e)
 	})()
-	defer func() {
-		n.closeComplete <- true
-		slog.Debug("Shutting down service sender for %v", n.ServiceName)
-	}()
 	if n.conn != nil && !n.IsClosed() {
-		for ; ; {
+		for {
 			select {
 			case <-n.writerShutdown:
-				return
+				panic(errors.New("writer shutdown"))
 			case pb := <-n.sender:
 				slog.Debug("N.Conn: %v Remote:%v", n.conn.LocalAddr(), n.conn.RemoteAddr())
 				if writeDeadlineIsActive {
@@ -110,6 +117,7 @@ func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActi
 				if err != nil {
 					checkError(err)
 				}
+				n.lastTxRx = time.Now()
 			default:
 				time.Sleep(1 * time.Millisecond)
 			}
@@ -117,34 +125,32 @@ func (n *Nan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsActi
 	}
 }
 
+func (n *Nan0) closeLogic() {
+	go func() {
+		_ = n.conn.SetReadDeadline(time.Now())
+		n.readerShutdown <- struct{}{}
+		slog.Debug("Reader stream for Nan0 server '%v' shutdown signal sent", n.ServiceName)
+		n.writerShutdown <- struct{}{}
+		slog.Debug("Writer stream for Nan0 server '%v' shutdown signal sent", n.ServiceName)
+	}()
+	AwaitNSignals(n.closeComplete, 2)
+	// after goroutines are closed, close the read/write channels
+	close(n.closed)
+}
+
 // performs a close on everything except closing the connection
 func (n *Nan0) softClose() {
 	defer recoverPanic(func(e error) {
 		slog.Fail("Failed to close %s due to %v", n.ServiceName, e)
 	})
+	n.closeMux.Lock()
+	defer n.closeMux.Unlock()
 	if n.IsClosed() {
+		slog.Warn("%s already closed.", n.ServiceName)
 		return
 	}
-	n.readerShutdown <- true
-	slog.Debug("Reader stream for Nan0 server '%v' shutdown signal sent", n.ServiceName)
-	n.writerShutdown <- true
 	_ = n.conn.SetReadDeadline(time.Now())
-	slog.Debug("Writer stream for Nan0 server '%v' shutdown signal sent", n.ServiceName)
-	<-n.closeComplete
-	<-n.closeComplete
-	slog.Debug("Dialed connection for server %v closed after shutdown signal received", n.ServiceName)
-	// after goroutines are closed, close the read/write channels
-	go func() {
-		for range n.receiver {}
-		slog.Debug("Drained client %s receiver", n.ServiceName)
-	}()
-	close(n.receiver)
-	go func() {
-		for range n.sender {}
-		slog.Debug("Drained client %s sender", n.ServiceName)
-	}()
-	close(n.sender)
-	close(n.closed)
+	n.closeLogic()
 	slog.Debug("Connection %v is soft closed", n.ServiceName)
 }
 
@@ -153,11 +159,12 @@ func (n *Nan0) Close() {
 	defer recoverPanic(func(e error) {
 		slog.Fail("Failed to close %s due to %v", n.ServiceName, e)
 	})
+	n.closeMux.Lock()
+	defer n.closeMux.Unlock()
 	if n.IsClosed() {
-		slog.Warn("%s already closed.", n.ServiceName)
 		return
 	}
-	n.softClose()
+	n.closeLogic()
 	_ = n.conn.SetReadDeadline(time.Now())
 	_ = n.conn.Close()
 	slog.Warn("Connection to %v is shut down!", n.ServiceName)

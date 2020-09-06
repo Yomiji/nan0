@@ -5,6 +5,8 @@ import (
 	"crypto/tls"
 	"net/http"
 	"net/url"
+	"sync"
+	"time"
 
 	"github.com/yomiji/mdns"
 	"github.com/yomiji/slog"
@@ -55,21 +57,21 @@ func AppendOrigins(origin ...*url.URL) wsBuilderOption {
 }
 
 func (wsb *WebsocketBuilder) BuildWebsocketClient(opts ...interface{}) (nan0 NanoServiceWrapper, err error) {
-	buildOpts(opts, wsb)
+	wsb.buildOpts(opts)
 	return wrapWsClient(wsb)(&wsb.baseBuilder)
 }
 
 func (wsb *WebsocketBuilder) BuildWebsocketDNS(ctx context.Context, strategy clientDNSStrategy, opts ...interface{}) ClientDNSFactory {
-	buildOpts(opts, wsb)
+	wsb.buildOpts(opts)
 	return buildDNS(ctx, &wsb.baseBuilder, wrapWsClient(wsb), strategy)
 }
 
 func (wsb *WebsocketBuilder) BuildWebsocketServer(opts ...interface{}) (*NanoServer, error) {
-	buildOpts(opts, wsb)
+	wsb.buildOpts(opts)
 	return buildWebsocketServer(wsb)
 }
 
-func buildOpts(opts []interface{}, wsb *WebsocketBuilder) {
+func (wsb *WebsocketBuilder) buildOpts(opts []interface{}) {
 	for _, opt := range opts {
 		switch ot := opt.(type) {
 		case baseBuilderOption:
@@ -97,10 +99,29 @@ func wrapConnectionWs(connection *websocket.Conn, bb *baseBuilder) (nan0 NanoSer
 		writerShutdown: make(chan bool, 1),
 		readerShutdown: make(chan bool, 1),
 		closeComplete:  make(chan bool, 2),
+		lastTxRx: time.Now(),
+		closeMux: new(sync.Mutex),
 	}
 
-	go nan0.startServiceReceiver(bb.routes, bb.messageIdentMap, nil, nil)
-	go nan0.startServiceSender(bb.inverseIdentMap, bb.writeDeadlineActive, nil, nil)
+	closeChannel := make(chan struct{})
+	go func(closer chan<- struct{}) {
+		defer func() {
+			recoverPanic(func(_ error) {})
+			closer <- struct{}{}
+		}()
+		nan0.startServiceReceiver(bb.routes, bb.messageIdentMap, nil, nil)
+	}(closeChannel)
+	go func(closer chan<- struct{}) {
+		defer func() {
+			recoverPanic(func(_ error) {})
+			closer <- struct{}{}
+		}()
+		nan0.startServiceSender(bb.inverseIdentMap, bb.writeDeadlineActive, nil, nil)
+	}(closeChannel)
+	go func(closer <-chan struct{}) {
+		defer nan0.Close()
+		<-closer
+	}(closeChannel)
 
 	return nan0, err
 }
@@ -154,6 +175,17 @@ func buildWebsocketServer(wsb *WebsocketBuilder) (server *NanoServer, err error)
 
 	server.connectionsList.init()
 	server.allConnectionsList.init()
+
+	if wsb.purgeConnections > 0 {
+		go func() {
+			ticker := time.NewTicker(wsb.purgeConnections)
+			defer ticker.Stop()
+			for !server.IsShutdown() {
+				server.allConnectionsList.purgeClosedConnections()
+				<-ticker.C
+			}
+		}()
+	}
 
 	var upgrader = websocket.Upgrader{
 		ReadBufferSize:  1024,
@@ -216,7 +248,6 @@ func buildWebsocketServer(wsb *WebsocketBuilder) (server *NanoServer, err error)
 				slog.Info("Websocket server %s closed.", serviceName)
 			}
 		}
-
 	}(server.GetServiceName(), *wsb)
 
 	return

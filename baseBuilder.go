@@ -17,15 +17,18 @@ type baseBuilderOption func(bb *baseBuilder)
 type nanoClientFactory func(*baseBuilder) (NanoServiceWrapper, error)
 
 type baseBuilder struct {
-	ns                  *Service
-	writeDeadlineActive bool
-	messageIdentMap     map[int]proto.Message
-	inverseIdentMap     map[string]int
-	routes              RouteMap
-	serviceDiscovery    bool
-	sendBuffer          int
-	receiveBuffer       int
-	secure              bool
+	ns                   *Service
+	writeDeadlineActive  bool
+	messageIdentMap      map[int]proto.Message
+	inverseIdentMap      map[string]int
+	routes               RouteMap
+	serviceDiscovery     bool
+	purgeConnections     time.Duration
+	txRxIdleDuration     time.Duration
+	maxServerConnections int
+	sendBuffer           int
+	receiveBuffer        int
+	secure               bool
 }
 
 func (bb *baseBuilder) initialize(s *Service) {
@@ -65,7 +68,6 @@ func Secure(bb *baseBuilder) {
 func ToggleWriteDeadline(writeDeadline bool) baseBuilderOption {
 	return func(bb *baseBuilder) {
 		bb.writeDeadlineActive = writeDeadline
-
 	}
 }
 
@@ -91,10 +93,16 @@ func AddMessageIdentity(messageIdent proto.Message) baseBuilderOption {
 
 // Route enables service or client to respond to receipt of a message with the given ExecutableRoute
 //  NOTE: route must not be nil
-func Route(messageIdent proto.Message, route ExecutableRoute) baseBuilderOption{
+func Route(messageIdent proto.Message, route ExecutableRoute) baseBuilderOption {
 	return func(bb *baseBuilder) {
 		addSingleIdentity(messageIdent, bb)
 		addRoute(messageIdent, route, bb)
+	}
+}
+
+func MaxConnections(max int) baseBuilderOption {
+	return func(builder *baseBuilder) {
+		builder.maxServerConnections = max
 	}
 }
 
@@ -125,6 +133,18 @@ func SendBuffer(sendBuffer int) baseBuilderOption {
 func ReceiveBuffer(receiveBuffer int) baseBuilderOption {
 	return func(bb *baseBuilder) {
 		bb.receiveBuffer = receiveBuffer
+	}
+}
+
+func PurgeConnectionsAfter(duration time.Duration) baseBuilderOption {
+	return func(bb *baseBuilder) {
+		bb.purgeConnections = duration
+	}
+}
+
+func MaxIdleDuration(duration time.Duration) baseBuilderOption {
+	return func(bb *baseBuilder) {
+		bb.txRxIdleDuration = duration
 	}
 }
 

@@ -1,6 +1,8 @@
 package nan0
 
 import (
+	"time"
+
 	"google.golang.org/protobuf/proto"
 )
 
@@ -16,7 +18,7 @@ type NanoServiceWrapper interface {
 }
 
 // Close the wrapper goroutines and the underlying connections
-// Check if the wrapper is closed
+// IsClosed Check if the wrapper is closed
 type Closer interface {
 	Close()
 	IsClosed() bool
@@ -26,6 +28,8 @@ type Closer interface {
 type TxRx interface {
 	Sender
 	Receiver
+	// LastComm returns the time of last Tx or Rx
+	LastComm() time.Time
 }
 
 // Return the sender channel for this nanoservice wrapper, messages are sent along this route
@@ -66,6 +70,7 @@ type ServiceLifecycle interface {
 type ConnectionHandler interface {
 	GetConnections() <-chan NanoServiceWrapper
 	AddConnection(NanoServiceWrapper)
+	ActiveConnectionsCount() int
 }
 
 // Generates discovery tags

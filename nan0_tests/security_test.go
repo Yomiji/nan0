@@ -3,12 +3,12 @@ package nan0_tests
 import (
 	"context"
 	"crypto/tls"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/yomiji/nan0/v2"
-	"github.com/yomiji/slog"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -23,7 +23,6 @@ func TestSecurity_SecurityEstablished(t *testing.T) {
 
 	server, err := ns.NewNanoBuilder().
 		BuildNanoServer(
-			nan0.ToggleWriteDeadline(false),
 			nan0.Secure,
 		)
 	if err != nil {
@@ -31,11 +30,8 @@ func TestSecurity_SecurityEstablished(t *testing.T) {
 	}
 	defer server.Shutdown()
 
-	serviceMsg := proto.Clone(new(nan0.Service))
 	n, err := ns.NewNanoBuilder().
 		BuildNanoClient(
-			nan0.AddMessageIdentity(serviceMsg),
-			nan0.ToggleWriteDeadline(false),
 			nan0.Secure,
 		)
 	if err != nil {
@@ -51,45 +47,47 @@ func TestSecurity_SecurityEstablished(t *testing.T) {
 }
 
 func TestSecurity_SecureObjectSent(t *testing.T) {
-	ns := &nan0.Service{
-		ServiceName: "TestService",
+	nsServer := &nan0.Service{
+		ServiceName: "TestServer",
 		Port:        nsDefaultPort - 8,
 		HostName:    "localhost",
 		ServiceType: "Test",
 		StartTime:   time.Now().Unix(),
 	}
-	serviceMsg := proto.Clone(new(nan0.Service))
+	nsClient := &nan0.Service{
+		ServiceName: "TestServerRemote",
+		Port:        nsDefaultPort - 8,
+		HostName:    "localhost",
+		ServiceType: "Test",
+		StartTime:   time.Now().Unix(),
+	}
 
-	server, err := ns.NewNanoBuilder().
+	server, err := nsServer.NewNanoBuilder().
 		BuildNanoServer(
-			nan0.AddMessageIdentity(serviceMsg),
-			nan0.ToggleWriteDeadline(false),
+			nan0.Route(new(nan0.Service), new(TestRoute)),
 			nan0.Secure,
 		)
 	if err != nil {
 		t.Fatalf(" \t\tTest Failed, error: %v\n", err)
 	}
 	defer server.Shutdown()
-	StartTestServerThread(server)
 
-	n, err := ns.NewNanoBuilder().
+	n, err := nsClient.NewNanoBuilder().
 		BuildNanoClient(
-			nan0.AddMessageIdentity(serviceMsg),
-			nan0.ToggleWriteDeadline(false),
+			nan0.AddMessageIdentity(new(nan0.Service)),
 			nan0.Secure,
 		)
 	if err != nil {
 		t.Fatalf(" \t\tTest Failed, error: %v\n", err)
 	}
 	defer n.Close()
-	n.GetSender() <- ns
-	select {
-	case r := <-n.GetReceiver():
-		if !proto.Equal(r.(proto.Message), ns) {
-			t.Fatalf("%v != %v", r, ns)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatalf("Test timeout")
+	n.GetSender() <- nsServer
+	obj, ok := <-n.GetReceiver()
+	if !ok {
+		t.Fatalf("receiver error")
+	}
+	if _, ok := obj.(*nan0.Service); !ok {
+		t.Fatalf("expected object type *nan0.service, got %v", reflect.TypeOf(obj))
 	}
 }
 
@@ -106,23 +104,25 @@ func TestSecurity_InsecureClientCannotConnect(t *testing.T) {
 	server, err := ns.NewNanoBuilder().
 		BuildNanoServer(
 			nan0.AddMessageIdentity(serviceMsg),
-			nan0.ToggleWriteDeadline(false),
+			nan0.ToggleWriteDeadline(true),
+		    nan0.MaxIdleDuration(100 * time.Millisecond),
 			nan0.Secure,
 		)
 	if err != nil {
 		t.Fatalf(" \t\tTest Failed, error: %v\n", err)
 	}
 	defer server.Shutdown()
-	defer func() {
-		recover()
-		slog.Info("Passed due to panic created")
-
-	}()
+	//defer func() {
+	//	recover()
+	//	slog.Info("Passed due to panic created")
+	//
+	//}()
 	StartTestServerThread(server)
 	n, err := ns.NewNanoBuilder().
 		BuildNanoClient(
 			nan0.AddMessageIdentity(serviceMsg),
-			nan0.ToggleWriteDeadline(false),
+			nan0.ToggleWriteDeadline(true),
+		    nan0.MaxIdleDuration(100 * time.Millisecond),
 			nan0.Insecure,
 		)
 	if err != nil {
@@ -130,11 +130,18 @@ func TestSecurity_InsecureClientCannotConnect(t *testing.T) {
 	}
 	defer n.Close()
 
-	n.GetSender() <- serviceMsg
+	closed := make(chan struct{})
+	go func() {
+		for !n.IsClosed() {
+			time.Sleep(1 * time.Millisecond)
+		}
+		closed <- struct{}{}
+	}()
 	select {
-	case <-n.GetReceiver():
+	case <-closed:
+		t.Log("Passed: Connection closed")
+	case <-time.After(3*time.Second):
 		t.Fatal("Not expected a result")
-	case <-time.After(2 * time.Second):
 	}
 }
 
@@ -270,7 +277,7 @@ func TestSecurity_SecureDiscoveryWebsocket(t *testing.T) {
 	defer cancelFunc()
 
 	client.GetSender() <- ns
-	if v, ok := (<-client.GetReceiver()).(*nan0.Service); ok && v.StartTime != ns.StartTime {
+	if v, ok := (<-client.GetReceiver()).(*nan0.Service); !ok || (ok && v.StartTime != ns.StartTime) {
 		t.Fatal("Not equal")
 	}
 }

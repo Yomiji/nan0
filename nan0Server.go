@@ -31,6 +31,12 @@ type NanoServer struct {
 	mdnsServer          *mdns.Server
 }
 
+func (server NanoServer) ActiveConnectionsCount() int {
+	server.allConnectionsList.rwMux.RLock()
+	defer server.allConnectionsList.rwMux.RUnlock()
+	return server.allConnectionsList.innerList.Len()
+}
+
 // Exposes the service delegate's serviceName property
 func (server NanoServer) GetServiceName() string {
 	return server.service.ServiceName
@@ -68,6 +74,24 @@ type connList struct {
 func (cl *connList) init() {
 	cl.innerList = new(list.List)
 	cl.rwMux = new(sync.RWMutex)
+}
+
+func (cl *connList) purgeClosedConnections() {
+	cl.rwMux.Lock()
+	defer cl.rwMux.Unlock()
+	if cl.innerList.Len() == 0 {
+		return
+	}
+	l := cl.innerList
+	k := new(list.List)
+	for e := l.Front(); e != nil; e = e.Next() {
+		if v,ok := e.Value.(NanoServiceWrapper); ok {
+			if !v.IsClosed() {
+				k.PushBack(v)
+			}
+		}
+	}
+	cl.innerList = k
 }
 
 func (cl connList) dumpConnListToSlice() []NanoServiceWrapper {

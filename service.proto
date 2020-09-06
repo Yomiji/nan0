@@ -6,10 +6,10 @@ option go_package = "github.com/yomiji/nan0";
 
 message Service {
     bool expired = 1;
-    int32 port = 3;
-    int64 startTime = 5;
-    string hostName = 7; // an externally facing host name which clients connect to
-    string uri = 9;
-    string serviceName = 11;
-    string serviceType = 12;
+    int32 port = 2;
+    int64 startTime = 3;
+    string hostName = 5; // an externally facing host name which clients connect to
+    string uri = 7;
+    string serviceName = 8;
+    string serviceType = 9;
 }
