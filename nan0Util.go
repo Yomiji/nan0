@@ -85,11 +85,11 @@ func CheckAndDoWithDuration(awaitedCondition func() bool, do func(), after time.
 	if after == 0 {
 		after = 333 * time.Microsecond
 	}
-	timer := time.NewTimer(after)
-	defer timer.Stop()
+	ticker := time.NewTicker(after)
+	defer ticker.Stop()
 	defer do()
 	for awaitedCondition() {
-		<-timer.C
+		<-ticker.C
 	}
 }
 

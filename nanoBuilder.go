@@ -21,6 +21,7 @@ type nanoBuilderOption func(*NanoBuilder)
 type NanoBuilder struct {
 	*baseBuilder
 }
+
 func (nsb *NanoBuilder) buildOpts(opts []interface{}) {
 	for _, opt := range opts {
 		switch ot := opt.(type) {
@@ -66,13 +67,18 @@ func wrapConnectionTcp(connection net.Conn, bb *baseBuilder, encKey *[32]byte, h
 		closed:         make(chan struct{}),
 		readerShutdown: make(chan struct{}, 1),
 		writerShutdown: make(chan struct{}, 1),
-		closeComplete:  make(chan struct{}, 2),
 		lastTxRx:       time.Now(),
 		closeMux:       new(sync.Mutex),
 	}
 
-	go nan0.startServiceReceiver(bb.routes, bb.messageIdentMap, encKey, hmac)
-	go nan0.startServiceSender(bb.inverseIdentMap, bb.writeDeadlineActive, encKey, hmac)
+	go func() {
+		nan0.startServiceReceiver(bb.routes, bb.messageIdentMap, encKey, hmac)
+		nan0.Close()
+	}()
+	go func() {
+		nan0.startServiceSender(bb.inverseIdentMap, bb.writeDeadlineActive, encKey, hmac)
+		nan0.Close()
+	}()
 	go CheckAndDoWithDuration(func() bool {
 		if bb.txRxIdleDuration <= 0 {
 			return nan0.LastComm().Add(defaultTxRxIdleDuration).After(time.Now())
@@ -83,7 +89,6 @@ func wrapConnectionTcp(connection net.Conn, bb *baseBuilder, encKey *[32]byte, h
 			nan0.GetServiceName(), bb.txRxIdleDuration, nan0.LastComm())
 		nan0.Close()
 	}, bb.txRxIdleDuration)
-
 
 	return nan0, err
 }

@@ -23,11 +23,9 @@ type WsNan0 struct {
 	// The closed status
 	closed chan struct{}
 	// Channel governing the reader service
-	readerShutdown chan bool
+	readerShutdown chan struct{}
 	// Channel governing the writer service
-	writerShutdown chan bool
-	// Channel governing the shutdown completion
-	closeComplete chan bool
+	writerShutdown chan struct{}
 	// Last communication time
 	lastTxRx time.Time
 	// A connection maintained by this object
@@ -46,15 +44,11 @@ func (n WsNan0) startServiceSender(inverseMap map[string]int, writeDeadlineIsAct
 	defer recoverPanic(func(e error) {
 		slog.Fail("Connection to %v sender service error occurred: %v", n.GetServiceName(), e)
 	})()
-	defer func() {
-		n.closeComplete <- true
-		slog.Debug("Shutting down service sender for %v", n.ServiceName)
-	}()
 	if n.conn != nil && !n.IsClosed() {
 		for ; ; {
 			select {
 			case <-n.writerShutdown:
-				return
+				panic(errors.New("writer shutdown"))
 			case pb := <-n.sender:
 				slog.Debug("N.Conn: %v Remote:%v", n.conn.LocalAddr(), n.conn.RemoteAddr())
 				if writeDeadlineIsActive {
@@ -78,52 +72,31 @@ func (n WsNan0) softClose() {
 }
 
 // Closes the open connection and terminates the goroutines associated with reading them
-func (n WsNan0) Close() {
+func (n *WsNan0) Close() {
 	defer recoverPanic(func(e error) {
 		slog.Fail("Failed to close %s due to %v", n.ServiceName, e)
 	})
+
 	n.closeMux.Lock()
 	defer n.closeMux.Unlock()
 	if n.IsClosed() {
 		return
 	}
-
 	go func() {
-		n.readerShutdown <- true
+		n.readerShutdown <- struct{}{}
 		slog.Debug("Reader stream for Nan0 server '%v' shutdown signal sent", n.ServiceName)
-		n.writerShutdown <- true
-		_ = n.conn.SetReadDeadline(time.Now())
+		n.writerShutdown <- struct{}{}
 		slog.Debug("Writer stream for Nan0 server '%v' shutdown signal sent", n.ServiceName)
+		_ = n.conn.SetReadDeadline(time.Now())
 	}()
-	ticker := time.NewTicker(3 * time.Second)
-	defer ticker.Stop()
-	select {
-	case <-n.closeComplete:
-	case <-ticker.C:
-	}
-	select {
-	case <-n.closeComplete:
-	case <-ticker.C:
-	}
 	slog.Debug("Dialed connection for server %v closed after shutdown signal received", n.ServiceName)
-	// after goroutines are closed, close the read/write channels
-	go func() {
-		for range n.receiver {}
-		slog.Debug("Drained client %s receiver", n.ServiceName)
-	}()
-	close(n.receiver)
-	go func() {
-		for range n.sender {}
-		slog.Debug("Drained client %s sender", n.ServiceName)
-	}()
-	close(n.sender)
 	_ = n.conn.Close()
 	close(n.closed)
 	slog.Debug("Connection %v is closed", n.ServiceName)
 }
 
 // Determine if this connection is closed
-func (n WsNan0) IsClosed() bool {
+func (n *WsNan0) IsClosed() bool {
 	select {
 	case <-n.closed:
 		return true
@@ -158,16 +131,12 @@ func (n WsNan0) startServiceReceiver(rmap RouteMap, identMap map[int]proto.Messa
 	defer recoverPanic(func(e error) {
 		slog.Fail("Connection to %v receiver service error occurred: %v", n.GetServiceName(), e)
 	})()
-	defer func() {
-		n.closeComplete <- true
-		slog.Debug("Shutting down service receiver for %v", n.ServiceName)
-	}()
 
 	if n.conn != nil && !n.IsClosed() {
 		for ; ; {
 			select {
 			case <-n.readerShutdown:
-				return
+				panic(errors.New("reader shutdown"))
 			default:
 				err := n.conn.SetReadDeadline(time.Now().Add(TCPTimeout))
 				checkError(err)
@@ -182,11 +151,11 @@ func (n WsNan0) startServiceReceiver(rmap RouteMap, identMap map[int]proto.Messa
 				if newMsg != nil {
 					if exec, ok := rmap[getProtobufMessageName(newMsg)]; ok {
 						//Execute any mapped routes
-						exec.Execute(newMsg, n.GetSender())
-					} else if exec,ok := rmap[DefaultRoute]; len(rmap) > 0 && ok {
+						exec.Execute(newMsg, n.sender)
+					} else if exec, ok := rmap[DefaultRoute]; len(rmap) > 0 && ok {
 						//If no mapped routes, execute default route if defined
-						exec.Execute(newMsg, n.GetSender())
-					} else if len(rmap) == 0 {
+						exec.Execute(newMsg, n.sender)
+					} else {
 						//If no routes defined, send the message received to the receive buffer
 						// for manual processing
 						n.receiver <- newMsg

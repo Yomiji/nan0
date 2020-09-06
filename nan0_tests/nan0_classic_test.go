@@ -85,8 +85,10 @@ func TestNan0_FailWithWrongType(t *testing.T) {
 		if ok {
 			t.Fatal("\t\tTest Failed, Nan0 should not have received anything")
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("\t\tTest Failed, Timeout")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if !n.IsClosed() {
+		t.Fatal("expected the client to be closed")
 	}
 }
 func TestNan0_MixedOrderMessageIdent(t *testing.T) {
@@ -268,8 +270,8 @@ func TestNan0_GetAllClientsWithPurge(t *testing.T) {
 	// message types need to be registered before used so add a new one
 	server, err := serviceConf.NewNanoBuilder().
 		BuildNanoServer(
-			nan0.PurgeConnectionsAfter(1 * time.Millisecond),
-			nan0.MaxIdleDuration(200 * time.Millisecond),
+			nan0.PurgeConnectionsAfter(10 * time.Millisecond),
+			nan0.MaxIdleDuration(100 * time.Millisecond),
 		)
 	if err != nil {
 		t.Fatalf(" \t\tTest Failed, error: %v\n", err)
@@ -298,7 +300,7 @@ func TestNan0_GetAllClientsWithPurge(t *testing.T) {
 	nan0.CheckAndDo(func() bool {
 		return !client.IsClosed()
 	}, func() {
-		time.Sleep(150 * time.Millisecond)
+		time.Sleep(150 * time .Millisecond)
 		if n := server.ActiveConnectionsCount(); n != 0 {
 			t.Fatalf("Expected 0 client, got %d", n)
 		}

@@ -82,12 +82,13 @@ func TestSecurity_SecureObjectSent(t *testing.T) {
 	}
 	defer n.Close()
 	n.GetSender() <- nsServer
-	obj, ok := <-n.GetReceiver()
-	if !ok {
-		t.Fatalf("receiver error")
-	}
-	if _, ok := obj.(*nan0.Service); !ok {
-		t.Fatalf("expected object type *nan0.service, got %v", reflect.TypeOf(obj))
+	select {
+	case obj := <-n.GetReceiver():
+		if _, ok := obj.(*nan0.Service); !ok {
+			t.Fatalf("expected object type *nan0.service, got %v", reflect.TypeOf(obj))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Test failed: timeout")
 	}
 }
 

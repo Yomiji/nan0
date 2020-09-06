@@ -96,33 +96,30 @@ func wrapConnectionWs(connection *websocket.Conn, bb *baseBuilder) (nan0 NanoSer
 		sender:         makeSendChannelFromBuilder(bb),
 		conn:           connection,
 		closed:         make(chan struct{}),
-		writerShutdown: make(chan bool, 1),
-		readerShutdown: make(chan bool, 1),
-		closeComplete:  make(chan bool, 2),
-		lastTxRx: time.Now(),
-		closeMux: new(sync.Mutex),
+		writerShutdown: make(chan struct{}, 1),
+		readerShutdown: make(chan struct{}, 1),
+		lastTxRx:       time.Now(),
+		closeMux:       new(sync.Mutex),
 	}
 
-	closeChannel := make(chan struct{})
-	go func(closer chan<- struct{}) {
-		defer func() {
-			recoverPanic(func(_ error) {})
-			closer <- struct{}{}
-		}()
+	go func() {
 		nan0.startServiceReceiver(bb.routes, bb.messageIdentMap, nil, nil)
-	}(closeChannel)
-	go func(closer chan<- struct{}) {
-		defer func() {
-			recoverPanic(func(_ error) {})
-			closer <- struct{}{}
-		}()
+		nan0.Close()
+	}()
+	go func() {
 		nan0.startServiceSender(bb.inverseIdentMap, bb.writeDeadlineActive, nil, nil)
-	}(closeChannel)
-	go func(closer <-chan struct{}) {
-		defer nan0.Close()
-		<-closer
-	}(closeChannel)
-
+		nan0.Close()
+	}()
+	go CheckAndDoWithDuration(func() bool {
+		if bb.txRxIdleDuration <= 0 {
+			return nan0.LastComm().Add(defaultTxRxIdleDuration).After(time.Now())
+		}
+		return nan0.LastComm().Add(bb.txRxIdleDuration).After(time.Now())
+	}, func() {
+		slog.Debug("[%s] Auto Close Triggered (idle: %v) (lastcom: %v)",
+			nan0.GetServiceName(), bb.txRxIdleDuration, nan0.LastComm())
+		nan0.Close()
+	}, bb.txRxIdleDuration)
 	return nan0, err
 }
 
@@ -166,24 +163,23 @@ func buildWebsocketServer(wsb *WebsocketBuilder) (server *NanoServer, err error)
 	}
 
 	server = &NanoServer{
-		service:           wsb.ns,
-		connectionsList:   new(connList),
+		service:            wsb.ns,
+		connectionsList:    new(connList),
 		allConnectionsList: new(connList),
-		closed:            make(chan struct{}),
-		mdnsServer:        mdnsServer,
+		closed:             make(chan struct{}),
+		mdnsServer:         mdnsServer,
 	}
 
 	server.connectionsList.init()
 	server.allConnectionsList.init()
 
-	if wsb.purgeConnections > 0 {
+	if wsb.purgeConnections <= 0 {
 		go func() {
-			ticker := time.NewTicker(wsb.purgeConnections)
-			defer ticker.Stop()
-			for !server.IsShutdown() {
-				server.allConnectionsList.purgeClosedConnections()
-				<-ticker.C
-			}
+			purgeLogic(defaultPurgeDuration, server, &wsb.baseBuilder)
+		}()
+	} else {
+		go func() {
+			purgeLogic(wsb.purgeConnections, server, &wsb.baseBuilder)
 		}()
 	}
 
