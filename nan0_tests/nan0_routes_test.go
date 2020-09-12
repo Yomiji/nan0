@@ -47,8 +47,8 @@ func TestNan0_Route(t *testing.T) {
 		if _, ok := val.(*nan0.Service); !ok {
 			t.Fatal("\t\tTest Failed, Nan0 should be nan0.Service")
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("\t\tTest Failed, Timeout")
+	case <-time.After(testTimeout):
+		t.Fatal("Test Timeout")
 	}
 }
 func TestNan0_DefaultRoute(t *testing.T) {

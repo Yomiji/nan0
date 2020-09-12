@@ -79,13 +79,13 @@ func wrapConnectionTcp(connection net.Conn, bb *baseBuilder, encKey *[32]byte, h
 		nan0.startServiceSender(bb.inverseIdentMap, bb.writeDeadlineActive, encKey, hmac)
 		nan0.Close()
 	}()
+	if bb.txRxIdleDuration <= 0 {
+		bb.txRxIdleDuration = defaultTxRxIdleDuration
+	}
 	go CheckAndDoWithDuration(func() bool {
-		if bb.txRxIdleDuration <= 0 {
-			return nan0.LastComm().Add(defaultTxRxIdleDuration).After(time.Now())
-		}
 		return nan0.LastComm().Add(bb.txRxIdleDuration).After(time.Now())
 	}, func() {
-		slog.Debug("[%s] Auto Close Triggered (idle: %v) (lastcom: %v)",
+		slog.Warn("[%s] Auto Close Triggered (idle: %v) (lastcom: %v)",
 			nan0.GetServiceName(), bb.txRxIdleDuration, nan0.LastComm())
 		nan0.Close()
 	}, bb.txRxIdleDuration)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/yomiji/goprocrypt/v2"
+	"github.com/yomiji/slog"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -62,6 +63,10 @@ func Secure(bb *baseBuilder) {
 		proto.Clone(new(goprocrypt.PublicKey)),
 		proto.Clone(new(goprocrypt.EncryptedMessage)),
 	)(bb)
+	if _,ok := bb.routes[""]; ok {
+		slog.Warn("Can't have default route for secure services")
+		delete(bb.routes, "")
+	}
 }
 
 // Part of the builder chain, sets write deadline to the TCPTimeout global value
@@ -95,6 +100,10 @@ func AddMessageIdentity(messageIdent proto.Message) baseBuilderOption {
 //  NOTE: route must not be nil
 func Route(messageIdent proto.Message, route ExecutableRoute) baseBuilderOption {
 	return func(bb *baseBuilder) {
+		if bb.secure && messageIdent == nil {
+			slog.Warn("Can't have default route for secure services")
+			return
+		}
 		addSingleIdentity(messageIdent, bb)
 		addRoute(messageIdent, route, bb)
 	}
@@ -155,7 +164,6 @@ func WithTimeout(duration time.Duration) clientDNSStrategy {
 		select {
 		case mdef, ok := <-definitionChannel:
 			if ok {
-				populateServiceFromMDef(bb.ns, mdef)
 				if err := processMdef(bb, mdef, strict); err != nil {
 					checkError(err)
 				}
@@ -182,12 +190,14 @@ func buildDNS(
 	clientBuilder nanoClientFactory,
 	strategy clientDNSStrategy,
 ) ClientDNSFactory {
-	definitionChannel := startClientServiceDiscovery(ctx, bb.ns)
+	getNext := make(chan struct{})
+	definitionChannel := startClientServiceDiscovery(ctx, bb.ns, getNext)
 	return func(strictProtocols bool) (nan0 NanoServiceWrapper, err error) {
 		defer recoverPanic(func(e error) {
 			nan0 = nil
 			err = e
 		})
+		getNext <- struct{}{}
 		strategy(strictProtocols, bb, definitionChannel)
 		return clientBuilder(bb)
 	}

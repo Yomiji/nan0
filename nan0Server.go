@@ -3,7 +3,6 @@ package nan0
 import (
 	"container/list"
 	"context"
-	"errors"
 	"net"
 	"net/http"
 	"sync"
@@ -134,13 +133,15 @@ func (cl *connList) removeConnListElement(element *list.Element) interface{} {
 	return cl.innerList.Remove(element)
 }
 
+// GetConnections
+// +-- Deprecated --+
 // Get the channel which is fed new connections to the server
 func (server *NanoServer) GetConnections() <-chan NanoServiceWrapper {
 	if server.IsShutdown() {
 		return nil
 	}
 	if server.connectionStreamInit {
-		panic(errors.New("the method GetConnections can only be called once per server"))
+		return nil
 	}
 	server.connectionStreamInit = true
 	c := make(chan NanoServiceWrapper)

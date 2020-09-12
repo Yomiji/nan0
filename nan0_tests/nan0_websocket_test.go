@@ -24,10 +24,10 @@ func TestWebsocketClient(t *testing.T) {
 	wsServer, _ = wsBuilder.BuildWebsocketServer(
 		nan0.AddMessageIdentity(proto.Clone(new(nan0.Service))),
 		nan0.AddOrigins("localhost:"+strconv.Itoa(int(wsDefaultPort))),
+		nan0.Route(nil, new(TestRoute)),
 	)
 
 	defer wsServer.Shutdown()
-	StartTestServerThread(wsServer)
 
 	ns2 := &nan0.Service{
 		ServiceName: "TestService2",
@@ -55,8 +55,8 @@ func TestWebsocketClient(t *testing.T) {
 		if val.(*nan0.Service).HostName != ns2.HostName {
 			t.Fatal("\t\tTest Failed, Values not validated")
 		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("\t\tTest Failed, Timeout")
+	case <-time.After(testTimeout):
+		t.Fatal("Test Timeout")
 	}
 }
 func TestNan0_RouteWs(t *testing.T) {
@@ -72,7 +72,6 @@ func TestNan0_RouteWs(t *testing.T) {
 	builder1 := ns.NewWebsocketBuilder()
 	server, err := builder1.BuildWebsocketServer(
 		nan0.AddOrigins("localhost:"+strconv.Itoa(int(wsDefaultPort))),
-		nan0.AddMessageIdentities(new(nan0.Service)),
 		nan0.Route(new(nan0.Service), new(TestRoute)),
 	)
 	if err != nil {
@@ -99,8 +98,8 @@ func TestNan0_RouteWs(t *testing.T) {
 		if _, ok := val.(*nan0.Service); !ok {
 			t.Fatal("\t\tTest Failed, received should be nan0.Service")
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("\t\tTest Failed, Timeout")
+	case <-time.After(testTimeout):
+		t.Fatal("Test Timeout")
 	}
 }
 func TestNan0_DefaultRouteWs(t *testing.T) {
@@ -155,8 +154,8 @@ func TestNan0_DefaultRouteWs(t *testing.T) {
 		if _, ok := val.(*any.Any); !ok {
 			t.Fatal("\t\tTest Failed, received should be any.Any")
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("\t\tTest Failed, Timeout")
+	case <-time.After(testTimeout):
+		t.Fatal("Test Timeout")
 	}
 }
 func TestNan0_InvalidRouteWs(t *testing.T) {

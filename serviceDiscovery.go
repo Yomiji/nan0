@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 
+	"github.com/yomiji/goprocrypt/v2"
 	"github.com/yomiji/mdns"
 	"github.com/yomiji/slog"
 	"google.golang.org/protobuf/proto"
@@ -41,7 +42,7 @@ func makeMdnsServer(nsb *baseBuilder, ws bool) (s *mdns.Server, err error) {
 	return mdnsServer, err
 }
 
-func startClientServiceDiscovery(ctx context.Context, ns DiscoverableService) <-chan *MDefinition {
+func startClientServiceDiscovery(ctx context.Context, ns DiscoverableService, getNext chan struct{}) <-chan *MDefinition {
 	serviceTag := ns.MdnsTag()
 	entriesCh := make(chan *mdns.ServiceEntry)
 	nan0ServicesFound := make(chan *MDefinition)
@@ -49,8 +50,7 @@ func startClientServiceDiscovery(ctx context.Context, ns DiscoverableService) <-
 		if ctx != nil {
 			<-ctx.Done()
 			slog.Debug("Shutting down a client discovery channel")
-			close(entriesCh)
-			close(nan0ServicesFound)
+			close(getNext)
 		}
 	}()
 	go func() {
@@ -71,17 +71,29 @@ func startClientServiceDiscovery(ctx context.Context, ns DiscoverableService) <-
 		}
 	}()
 
-	err := mdns.Lookup(serviceTag, entriesCh)
-	if err != nil {
-		slog.Fail("%v", err)
-	}
+	go func() {
+		for range getNext {
+			err := mdns.Lookup(serviceTag, entriesCh)
+			if err != nil {
+				slog.Fail("%v", err)
+			}
+		}
+	}()
+
 	return nan0ServicesFound
 }
 
 func getIdentityMessageNames(bb *baseBuilder) []string {
 	var protobufTypes []string
 	for _, v := range bb.messageIdentMap {
-		protobufTypes = append(protobufTypes, getProtobufMessageName(v))
+		switch name := getProtobufMessageName(v); name {
+		case getProtobufMessageName(new(goprocrypt.PublicKey)):
+		case getProtobufMessageName(new(goprocrypt.EncryptedMessage)):
+		default:
+			if name != "" {
+				protobufTypes = append(protobufTypes, name)
+			}
+		}
 	}
 	return protobufTypes
 }

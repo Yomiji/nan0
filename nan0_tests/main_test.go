@@ -3,29 +3,18 @@ package nan0_tests
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/yomiji/nan0/v2"
 	"github.com/yomiji/slog"
 	"google.golang.org/protobuf/proto"
 )
 
-var nsDefaultPort int32 = 2324
-var wsDefaultPort int32 = 8080
+const testTimeout = 15 * time.Second
+const nsDefaultPort int32 = 2324
+const wsDefaultPort int32 = 8080
 
 var wsServer nan0.Server
-
-func StartTestServerThread(wsServer nan0.Server) {
-	go func() {
-		if conn, ok := <-wsServer.GetConnections(); ok {
-			select {
-			case msg, ok := <-conn.GetReceiver():
-				if ok {
-					conn.GetSender() <- msg
-				}
-			}
-		}
-	}()
-}
 
 func TestMain(m *testing.M) {
 	slog.ToggleLogging(true, true, true, true)

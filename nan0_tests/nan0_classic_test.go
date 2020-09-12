@@ -56,7 +56,7 @@ func TestNan0_FailWithWrongType(t *testing.T) {
 	}
 
 	server, err := ns.NewNanoBuilder().BuildNanoServer(
-		nan0.AddMessageIdentity(proto.Clone(new(any.Any))),
+		nan0.Route(new(any.Any), new(TestRoute)),
 		nan0.ToggleWriteDeadline(true),
 		nan0.PurgeConnectionsAfter(3 * time.Second),
 	)
@@ -64,7 +64,6 @@ func TestNan0_FailWithWrongType(t *testing.T) {
 		t.Fatal("\t\tTest Failed BuildServer failed")
 	}
 	defer server.Shutdown()
-	StartTestServerThread(server)
 
 	n, err := ns.NewNanoBuilder().BuildNanoClient(
 		nan0.ToggleWriteDeadline(true),
@@ -106,13 +105,13 @@ func TestNan0_MixedOrderMessageIdent(t *testing.T) {
 			proto.Clone(new(nan0.Service)),
 			proto.Clone(new(any.Any)),
 		),
+		nan0.Route(nil, new(TestRoute)),
 	)
 	if err != nil {
 		t.Fatal("\t\tTest Failed BuildServer failed")
 	}
 
 	defer server.Shutdown()
-	StartTestServerThread(server)
 
 	n, err :=  ns.NewNanoBuilder().BuildNanoClient(
 		nan0.ToggleWriteDeadline(true),
@@ -136,8 +135,8 @@ func TestNan0_MixedOrderMessageIdent(t *testing.T) {
 			t.Fatal("\t\tTest Failed, Nan0 should not be Any")
 		}
 		n.Close()
-	case <-time.After(5 * time.Second):
-		t.Fatal("\t\tTest Failed, Timeout")
+	case <-time.After(testTimeout):
+		t.Fatal("Test Timeout")
 	}
 }
 func TestNan0_RepeatClient(t *testing.T) {
@@ -152,24 +151,13 @@ func TestNan0_RepeatClient(t *testing.T) {
 	// message types need to be registered before used so add a new one
 	server, err := serviceConf.NewNanoBuilder().
 		BuildNanoServer(
-			nan0.AddMessageIdentity(new(nan0.Service)),
+			nan0.Route(new(nan0.Service), new(TestRoute)),
 		)
 	if err != nil {
 		t.Fatalf(" \t\tTest Failed, error: %v\n", err)
 	}
 	// remember to ALWAYS shut your server down when finished
 	defer server.Shutdown()
-	// This server is configured to read a value and echo that value back out
-	go func() {
-		for conn := range server.GetConnections() {
-			select {
-			case msg, ok := <-conn.GetReceiver():
-				if ok {
-					conn.GetSender() <- msg
-				}
-			}
-		}
-	}()
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
@@ -190,8 +178,8 @@ func TestNan0_RepeatClient(t *testing.T) {
 			if waitingVal.(*nan0.Service).String() != serviceConf.String() {
 				t.Fatalf(" \t\tTest Failed, \n\t\tsent %v, \n\t\treceived: %v\n", serviceConf, waitingVal)
 			}
-		case <-time.After(5 * time.Second):
-			t.Fatal("\t\tTest Failed, Timeout")
+		case <-time.After(testTimeout):
+			t.Fatal("Test Timeout")
 		}
 	}()
 	wg.Add(1)
@@ -212,8 +200,8 @@ func TestNan0_RepeatClient(t *testing.T) {
 			if waitingVal.(*nan0.Service).String() != serviceConf.String() {
 				t.Fatalf(" \t\tTest Failed, \n\t\tsent %v, \n\t\treceived: %v\n", serviceConf, waitingVal)
 			}
-		case <-time.After(5 * time.Second):
-			t.Fatalf("Test timeout")
+		case <-time.After(testTimeout):
+			t.Fatal("Test Timeout")
 		}
 	}()
 	wg.Wait()
@@ -250,8 +238,8 @@ func TestNan0_GetAllClients(t *testing.T) {
 	client.GetSender() <- serviceConf
 	select {
 	case <-client.GetReceiver():
-	case <-time.After(5 * time.Second):
-		t.Fatalf("Test timeout")
+	case <-time.After(testTimeout):
+		t.Fatal("Test Timeout")
 	}
 	if n := len(server.GetAllConnections()); n != 1 {
 		t.Fatalf("Expected 1 client, got %d", n)
@@ -278,7 +266,6 @@ func TestNan0_GetAllClientsWithPurge(t *testing.T) {
 	}
 	// remember to ALWAYS shut your server down when finished
 	defer server.Shutdown()
-	StartTestServerThread(server)
 
 	clientConf := &nan0.Service{
 		ServiceName: "TestClient",
@@ -305,5 +292,4 @@ func TestNan0_GetAllClientsWithPurge(t *testing.T) {
 			t.Fatalf("Expected 0 client, got %d", n)
 		}
 	})
-
 }
